@@ -10,7 +10,9 @@ import { errMessage, useAction, useData, usePortalAuth } from './auth';
 import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from './pages/public';
 import { PrivacyNoticeModal } from './pages/common';
 import { ClientDashboard } from './pages/dashboard';
-import { ClientContractsPage, ClientEwaPage, ClientEwalletPage, ClientInvoicesPage, ClientRescuePage, FeedbackModal } from './pages/client';
+import { ClientEwalletPage } from './pages/ewallet';
+import { ClientContractsPage } from './pages/contracts';
+import { ClientEwaPage, ClientInvoicesPage, ClientRescuePage, FeedbackModal } from './pages/client';
 import { VendorPortalPage } from './pages/vendor';
 
 /** Back to the previous screen — only on screens reached through a link inside a page; hidden on screens opened from the portal menu. */

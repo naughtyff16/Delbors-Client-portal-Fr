@@ -4,7 +4,7 @@
 import {
   DEFAULT_SETTINGS, addDays, addHours, formatDate, formatPhp, manilaDay,
   type Branch, type Chassis, type Client, type Contract, type EquipmentType, type Invoice, type NotificationRule,
-  type Registration, type RoleCode, type User, type WorkflowInstance, type ChassisStatus, type Part,
+  type Registration, type RoleCode, type User, type WorkflowInstance, type ChassisStatus, type Part, type EwaDelivery,
 } from '../shared';
 import type { Db } from './db';
 
@@ -71,6 +71,7 @@ export function buildSeed(): Db {
     { ...mk('j.cruz@abclogistics.ph', 'Jun Cruz', 'Client — ABC Logistics (left the company)', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00123', branchAccess: [], status: 'Inactive' as const }, // deactivated portal user
     { ...mk('sales@luzonbrake.ph', 'Luzon Brake & Axle Trading', 'Vendor', ['VENDOR']), realm: 'VENDOR_PORTAL', vendorId: 'V-005', branchAccess: [] }, // vendor accreditation pending
     { ...mk('orders@metropaint.ph', 'Metro Paint Supply', 'Vendor', ['VENDOR']), realm: 'VENDOR_PORTAL', vendorId: 'V-004', branchAccess: [] }, // vendor deactivated by APS
+    { ...mk('finance@baysidehaulage.ph', 'Carla Mendoza', 'Client — Bayside Haulage', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00262', branchAccess: [] }, // contract ended, cash bond refundable
   ];
 
   // Portal users sign in with their email: the user ID and the email are the same address (one email = one company).
@@ -84,7 +85,9 @@ export function buildSeed(): Db {
     email: 'accounts@example.ph', ebillingEmail: 'billing@example.ph', phone: '(02) 8123 4567', creditLimit: 1500000, createdAt: ago(400), ...c,
   });
   const clients: Client[] = [
-    client({ clientCode: 'C-00123', clientName: 'ABC Logistics Inc.', status: 'Active', qbName: 'ABC LOGISTICS', tin: '201-555-123-000' }),
+    // Portal Contracts review: branches covered = the branches enabled for the account (CWS access), which now include the
+    // Batangas, Clark and Cagayan de Oro branches its units were released from (amendment request CRQ-000001, approved).
+    client({ clientCode: 'C-00123', clientName: 'ABC Logistics Inc.', status: 'Active', qbName: 'ABC LOGISTICS', tin: '201-555-123-000', cwsBranchAccess: ['MNL', 'NVL', 'CAV', 'BTG', 'CLK', 'CDO'] }),
     client({ clientCode: 'C-00188', clientName: 'Pacific Movers Corp.', status: 'Hold', billingCycle: 'Monthly', contacts: [contact('C-00188-1', 'Leo', 'Navarro')] }),
     client({ clientCode: 'C-00201', clientName: 'Visayas Freight Services', status: 'Active', branchCode: 'CEB', cwsBranchAccess: ['CEB'], contacts: [contact('C-00201-1', 'Ana', 'Lopez')] }),
     client({ clientCode: 'C-00215', clientName: 'Southern Haulers Co.', status: 'Active', branchCode: 'BTG', allowRescue: false, allowOnline: false, billingCycle: 'Monthly' }), // Allow Online = No (portal sign-in review)
@@ -92,6 +95,8 @@ export function buildSeed(): Db {
     client({ clientCode: 'C-00244', clientName: 'Northstar Trucking', status: 'Draft', createdAt: ago(16), contacts: [contact('C-00244-1', 'Rico', 'Dela Paz')] }),
     client({ clientCode: 'C-00251', clientName: 'Islandlink Cargo', status: 'Draft', registrationSource: 'Portal', createdAt: ago(1), contacts: [contact('C-00251-1', 'Tess', 'Uy')] }),
     client({ clientCode: 'C-00099', clientName: 'Defunct Transport Ltd.', status: 'Blacklist', isLegal: true }),
+    // Portal E-wallet review: contract ended, everything paid — its cash bond can be withdrawn (BR-14).
+    client({ clientCode: 'C-00262', clientName: 'Bayside Haulage Corp.', status: 'Active', branchCode: 'NVL', cwsBranchAccess: ['NVL', 'MNL'], tin: '262-118-447-000', createdAt: ago(380), contacts: [contact('C-00262-1', 'Carla', 'Mendoza')] }),
   ];
 
   const rates = (base: number) => equipmentTypes.map((e, i) => ({ equipmentType: e.code, dailyRate: base + i * 50, indemnity: 350000 + i * 25000 }));
@@ -112,7 +117,40 @@ export function buildSeed(): Db {
     contract('LTL-2026-0051', 'C-00201', 'LTL', 'A', 24, 850),
     contract('QLP-2026-0007', 'C-00215', 'QLP', 'Q', 5, 1200),
     contract('LTL-2026-0060', 'C-00230', 'LTL', 'A', 8, 950),
+    contract('QLP-2026-0003', 'C-00262', 'QLP', 'Q', 5, 1200, 'Expired'),
+    // Portal Contracts review: ABC's earlier contracts, so the list shows the Expired and Terminated states.
+    contract('QLP-2025-0019', 'C-00123', 'QLP', 'Q', 6, 1200, 'Expired'),
+    contract('SPL-2025-0007', 'C-00123', 'SPL', 'Z', undefined, 1100, 'Terminated'),
   ];
+  {
+    // LTL-2026-0045: entitlement for every type (sums to the 10 contracted units and covers every unit on hire); version 2 re-rated the
+    // 20ft flatbed to the 2026 LTL rate card (BR-18 — the earlier rate is kept in the rate history).
+    const abc = contracts.find((c) => c.contractNo === 'LTL-2026-0045')!;
+    const qty: Record<string, number> = { EQ1: 3, EQ2: 2, EQ3: 2, EQ4: 0, EQ5: 2, EQ6: 1, EQ7: 0, EQ8: 0 };
+    abc.entitlementByType = true;
+    abc.rates = abc.rates.map((r) => ({ ...r, qty: qty[r.equipmentType] ?? 0 }));
+    const v2At = ago(90);
+    abc.rateHistory = [
+      { version: 1, validFrom: abc.effectiveDate, validTo: manilaDay(addDays(v2At, -1)), reason: 'Rates at signing',
+        rates: abc.rates.map((r) => ({ equipmentType: r.equipmentType, dailyRate: r.equipmentType === 'EQ8' ? 1150 : r.dailyRate })) },
+      { version: 2, validFrom: manilaDay(v2At), reason: '20ft flatbed re-rated to the 2026 LTL rate card (specialised flatbed deck), approved by the Sales Director',
+        rates: abc.rates.map((r) => ({ equipmentType: r.equipmentType, dailyRate: r.dailyRate })) },
+    ];
+    abc.version = 2;
+    abc.versions = [{ version: 2, at: v2At, by: 'AE.JREYES', reason: '20ft flatbed rate aligned to the 2026 LTL rate card' }];
+    abc.history?.push({ status: 'Amended → v2', at: v2At, by: 'AE.JREYES', note: '20ft flatbed ₱1,150 → ₱1,250 per day (2026 LTL rate card)' });
+    // Earlier contracts: one ran to its end, one was ended early when ABC moved to the long-term lease.
+    const q = contracts.find((c) => c.contractNo === 'QLP-2025-0019')!;
+    Object.assign(q, { effectiveDate: manilaDay(ago(420)), expiryDate: manilaDay(ago(241)), unitQty: 4, createdAt: ago(425), signatoryId: 'C-00123-1',
+      rates: q.rates.map((r, i) => ({ ...r, qty: i < 2 ? 2 : 0 })), entitlementByType: true,
+      history: [{ status: 'Active', at: ago(420), by: 'AE.JREYES' }, { status: 'Expired', at: ago(240), by: 'system', note: 'End date reached' }],
+      documents: [{ kind: 'Signed copy', fileName: 'QLP-2025-0019-signed.pdf', at: ago(423), by: 'AE.JREYES' }] });
+    const t = contracts.find((c) => c.contractNo === 'SPL-2025-0007')!;
+    Object.assign(t, { effectiveDate: manilaDay(ago(560)), unitQty: 3, createdAt: ago(565), lockInMonths: 0,
+      termination: { workflowId: 'WF-CTT-1', reason: 'Moved all units to the long-term lease LTL-2026-0045', status: 'Approved', effectiveDate: manilaDay(ago(201)) },
+      history: [{ status: 'Active', at: ago(560), by: 'AE.JREYES' }, { status: 'Termination requested', at: ago(215), by: 'AE.JREYES', note: 'Client moving to LTL-2026-0045' }, { status: 'Terminated', at: ago(201), by: 'SALESDIR', note: 'Approved — no pre-termination fee (no lock-in)' }],
+      documents: [{ kind: 'Signed copy', fileName: 'SPL-2025-0007-signed.pdf', at: ago(562), by: 'AE.JREYES' }] });
+  }
 
   // Chassis fleet — ~70/30 company vs partner ownership (BR-13).
   const statuses: ChassisStatus[] = ['Available', 'Available', 'On Hire', 'On Hire', 'On Hire', 'Allocated', 'Breakdown', 'In Repair', 'Available', 'On Hire'];
@@ -168,9 +206,11 @@ export function buildSeed(): Db {
       const outAt = ago(75), inAt = ago(35), base = { chassisNo: ret.chassisNo, clientCode: 'C-00123', contractNo: 'LTL-2026-0045', trucker: 'XYZ Trucking', truckPlateNo: 'NAB 5590', driverName: 'Mario Reyes', driverLicenseNo: 'N02-15-334455',
         generalAssessment: 'Roadworthy' as const, signature: DEMO_SIGNATURE, branchCode: 'MNL', encodedBy: 'BG.MNL', inspection: [] };
       histEwas.push({ euNo: 'EU-TMP-R', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'MNL', driverName: 'Mario Reyes', driverLicenseNo: 'N02-15-334455', truckPlateNo: 'NAB 5590', trucker: 'XYZ Trucking',
-        units: [{ equipmentType: ret.chassisType, qty: 1, usedChassis: [ret.chassisNo] }], createdAt: addHours(outAt, -2), validUntil: addHours(outAt, 22), createdVia: 'Portal', status: 'Used', extensionCount: 0, createdBy: 'client@abclogistics.ph' });
+        // Portal EWA list review: extended once — expired before the truck arrived, extension approved, then used (GAT-003, BR-06).
+        units: [{ equipmentType: ret.chassisType, qty: 1, usedChassis: [ret.chassisNo] }], createdAt: addHours(outAt, -27), validUntil: addHours(outAt, 22.5), createdVia: 'Portal', status: 'Used', extensionCount: 1, createdBy: 'client@abclogistics.ph',
+        extensions: [{ requestedAt: addHours(outAt, -2.5), requestedBy: 'client@abclogistics.ph', reason: 'Truck held at the port; driver arriving this morning', workflowId: 'WF-EWX-0', status: 'Approved', decidedAt: addHours(outAt, -1.5), decidedBy: 'DYM.MNL', validUntilBefore: addHours(outAt, -3), validUntilAfter: addHours(outAt, 22.5) }] });
       gatePasses.push({ ...base, gatePassNo: 'MNL0880', direction: 'OUT', euNo: 'EU-TMP-R', truckOrcr: 'OR 4100190 / CR 5200290', actualEventAt: outAt, encodedAt: outAt, eirNo: 'EIR-MNL-000180', pairedGatePassNo: 'MNL0881', inspection: checklist() },
-        { ...base, gatePassNo: 'MNL0881', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, eirNo: 'EIR-MNL-000181', pairedGatePassNo: 'MNL0880', originBranchCode: 'MNL', remarks: 'Returned in good condition', inspection: checklist() });
+        { ...base, gatePassNo: 'MNL0881', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, eirNo: 'EIR-MNL-000181', pairedGatePassNo: 'MNL0880', originBranchCode: 'MNL', remarks: 'Tail lamp and wiring damaged — chargeable ₱4,500 (billed on INV-MNL-00001118)', inspection: checklist({ 'Lights & wiring': 4500 }) });
     }
     // Portal dashboard review (BR-16): an ABC unit hired out at Cavite and returned at Manila with the IT-issued cross-branch approval code.
     // A cracked tail lamp was found at Gate In — chargeable ₱950 on the inbound EIR. It is the oldest release, so it keeps EU-000599 and the other EU numbers do not move.
@@ -179,7 +219,8 @@ export function buildSeed(): Db {
       const outAt = ago(80), inAt = addHours(ago(44), 2.5), base = { chassisNo: xb.chassisNo, clientCode: 'C-00123', contractNo: 'LTL-2026-0045', trucker: 'XYZ Trucking', truckPlateNo: 'NAB 5601', driverName: 'Arnel Bautista', driverLicenseNo: 'N03-20-112233',
         generalAssessment: 'Roadworthy' as const, signature: DEMO_SIGNATURE, encodedBy: 'BG.MNL' };
       histEwas.push({ euNo: 'EU-000599', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'CAV', driverName: 'Arnel Bautista', driverLicenseNo: 'N03-20-112233', truckPlateNo: 'NAB 5601', trucker: 'XYZ Trucking',
-        units: [{ equipmentType: xb.chassisType, qty: 1, usedChassis: [xb.chassisNo] }], createdAt: addHours(outAt, -2), validUntil: addHours(outAt, 22), createdVia: 'Portal', status: 'Used', extensionCount: 0, createdBy: 'client@abclogistics.ph' });
+        // Portal EWA list review: partly released — 1 of 2 units left the gate; the EWA expired and the second unit lapsed.
+        units: [{ equipmentType: xb.chassisType, qty: 2, usedChassis: [xb.chassisNo] }], createdAt: addHours(outAt, -2), validUntil: addHours(outAt, 22), createdVia: 'Portal', status: 'Expired', extensionCount: 0, createdBy: 'client@abclogistics.ph' });
       gatePasses.push({ ...base, gatePassNo: 'CAV0871', direction: 'OUT', euNo: 'EU-000599', truckOrcr: 'OR 4100195 / CR 5200295', actualEventAt: outAt, encodedAt: outAt, branchCode: 'CAV', eirNo: 'EIR-CAV-000214', pairedGatePassNo: 'MNL0884', inspection: checklist() },
         { ...base, gatePassNo: 'MNL0884', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, branchCode: 'MNL', originBranchCode: 'CAV', crossBranchCode: 'XB-7Q4K2M', eirNo: 'EIR-CAV-000214', pairedGatePassNo: 'CAV0871',
           remarks: 'Left tail lamp cracked — chargeable on the inbound EIR', inspection: checklist({ 'Lights & wiring': 950 }) });
@@ -289,7 +330,8 @@ export function buildSeed(): Db {
     };
     invoices.push(
       // A one-off repair bill covers the gate-in day it was found, not a weekly lease period (review 1.1: no overlap with INV-MNL-00001102).
-      one('INV-MNL-00001118', 'C-00123', 'LTL-2026-0045', 8, 'Repair', { id: '', lineType: 'Damage', description: 'Chargeable damage — tail lamp + wiring (EIR gate-in)', chassisNo: chassis[0].chassisNo, rateType: 'Fixed — EIR chargeable', amount: 4500 }, 0, 'MNL', { periodStart: manilaDay(ago(9)), periodEnd: manilaDay(ago(9)) }),
+      // Portal invoice review: this is not a lease bill — it bills the damage found at the MNL0881 Gate In (35 days ago): ₱4,500 + 12% VAT = ₱5,040.
+      one('INV-MNL-00001118', 'C-00123', 'LTL-2026-0045', 8, 'Repair', { id: '', lineType: 'Damage', description: 'Chargeable damage — tail lamp + wiring (EIR-MNL-000181, Gate In MNL0881)', chassisNo: chassis[0].chassisNo, from: ago(35), to: ago(35), rateType: 'Fixed — EIR chargeable', amount: 4500 }, 0, 'MNL', { periodStart: manilaDay(ago(35)), periodEnd: manilaDay(ago(35)) }),
       one('INV-CEB-00000315', 'C-00201', 'LTL-2026-0051', 3, 'GPS', { id: '', lineType: 'GPS', description: 'GPS tracking fee — 2 units × 1 month', days: 2, rate: 500, rateType: 'Monthly per unit (proposed, DBL-FIN-010)', amount: 1000 }, 0, 'CEB'),
       one('INV-MNL-00001105', 'C-00230', 'LTL-2026-0060', 18, 'Special', { id: '', lineType: 'Special', description: 'Special billing — weekend yard handling', rateType: 'Fixed — special billing', amount: 2000, reason: 'Client request (DBL-FIN-004)' }, 0, 'MNL', { credited: 2240 }),
       // Numbered right after INV-MNL-00001102: the duplicate came out of the same billing run (review 1.1: numbers follow issue dates).
@@ -297,6 +339,11 @@ export function buildSeed(): Db {
     );
     invoices[invoices.length - 1].history?.push({ at: ago(12), by: 'FINMGR', action: 'Cancelled', note: 'Billing batch conflict — duplicate of INV-MNL-00001102' });
     invoices[invoices.length - 2].history?.push({ at: ago(10), by: 'FINMGR', action: 'Credited', note: 'CM-000008 applied (no-rescue service dispute)' });
+    // Portal invoice review: the weekly lease bill that follows INV-MNL-00001102 — billing periods now run without a gap.
+    invoices.push(inv('INV-MNL-00001119', 'C-00123', 'LTL-2026-0045', 6, [[7, 7], [7, 7], [6, 7], [5, 7], [5, 7]], 0));
+    // BR-05 / review: CM-000010 (2% creditable withholding tax, BIR 2307) applied to INV-MNL-00001101 — shown as a Credit Memo row on the SOA.
+    const i1101 = invoices.find((i) => i.invoiceNo === 'INV-MNL-00001101');
+    if (i1101) { i1101.credited = 840; i1101.history?.push({ at: ago(2), by: 'ACCTG', action: 'Credited', note: 'CM-000010 applied (withholding tax, BIR 2307)' }); }
   }
 
   const parts: Part[] = [
@@ -444,8 +491,8 @@ export function buildSeed(): Db {
   if (leWf) { leWf.steps[0] = { ...leWf.steps[0], decision: 'Approved', decidedBy: 'DYM.MNL', decidedAt: ago(0.5), comment: 'DYM.MNL:DYM:Outage report verified|' }; leWf.currentStep = 1; leWf.steps[1].dueAt = ahead(1.5); }
   const leHeld = invoices[4].lines.find((l) => l.held);
   const billingMemos: Db['memos'] = [
-    { memoNo: 'CM-000010', type: 'Credit', clientCode: 'C-00123', referenceType: 'Other', amount: 840, reason: 'Creditable withholding tax (2% of ₱42,000) on INV-MNL-00001101 — BIR Form 2307 received', category: 'Withholding-tax adjustment', status: 'Approved', workflowId: 'WF-CM-10',
-      createdAt: ago(3), createdBy: 'ACCTG', source: 'Manual', evidence: ['BIR-2307-ABC-2026Q3.pdf'], approvalChain: ['Finance Manager'] },
+    { memoNo: 'CM-000010', type: 'Credit', clientCode: 'C-00123', referenceInvoiceNo: 'INV-MNL-00001101', referenceType: 'Invoice', amount: 840, reason: 'Creditable withholding tax (2% of ₱42,000) on INV-MNL-00001101 — BIR Form 2307 received', category: 'Withholding-tax adjustment', status: 'Applied', workflowId: 'WF-CM-10',
+      createdAt: ago(3), createdBy: 'ACCTG', source: 'Manual', evidence: ['BIR-2307-ABC-2026Q3.pdf'], approvalChain: ['Finance Manager'], appliedTo: 'INV-MNL-00001101', appliedAt: ago(2), balanceAfter: 46200 },
     { memoNo: 'CM-000009', type: 'Credit', clientCode: 'C-00201', referenceInvoiceNo: 'INV-CEB-00000310', referenceType: 'Late Encoding', referenceId: 'LE-00099', amount: leHeld?.amount ?? 0, reason: 'Late encoding 9 days — bill the held unit from the actual gate-out date (BR-05)',
       category: 'Late-encoding correction', status: 'Pending Approval', workflowId: 'WF-LE-1', createdAt: ago(1), createdBy: 'BG.MNL', source: 'Auto', evidence: ['outage-report-ITSR-0142.pdf'], approvalChain: ['Deputy Yard Manager', 'Treasury'] },
     { memoNo: 'CM-000008', type: 'Credit', clientCode: 'C-00230', referenceInvoiceNo: 'INV-MNL-00001105', referenceType: 'Invoice', amount: 2240, reason: 'Special billing disputed — handling was covered by the rescue already charged', category: 'No-rescue service dispute', status: 'Applied',
@@ -504,6 +551,15 @@ export function buildSeed(): Db {
   const breakdown = chassis.find((c) => c.status === 'Breakdown')!;
   const inRepair = chassis.find((c) => c.status === 'In Repair')!;
 
+  // Portal Rescue review (2026-11-11): one ABC unit is under rescue (RSC-000042, Dispatched); who is told about a new request.
+  const rsc42Unit = onHire.filter((c) => c.currentClientCode === 'C-00123')[2];
+  if (rsc42Unit) { rsc42Unit.status = 'Rescue'; rsc42Unit.statusSince = addHours(now(), -0.55); }
+  const rescueNotes = (at: string, urgent: boolean, branch = 'MNL'): EwaDelivery[] => ([
+    ['Delbros', 'Paolo Reyes — dispatcher', 'opsmgr@demo.delbros.local', 'Email'], ...(urgent ? [['Delbros', 'Paolo Reyes — dispatcher', '+63 917 000 0000', 'SMS']] : []),
+    ['Delbros', 'Grace Lim — Credit & Collection (eligibility check)', 'cnc.off1@demo.delbros.local', 'Email'], ...(branch === 'MNL' ? [['Delbros', 'Rocky Santos — Branch Generalist, MNL', 'bg.mnl@demo.delbros.local', 'Email']] as const : []),
+    ['Delbros', 'Jasmine Reyes — Account Executive', 'ae.jreyes@demo.delbros.local', 'Email'], ['Client', 'Maria Santos (confirmation)', 'client@abclogistics.ph', 'Email'],
+  ] as const).map(([audience, recipient, to, channel]) => ({ at, channel, audience, recipient, to, status: 'Sent' as const }) as EwaDelivery);
+
   // Portal dashboard review (2026-11-11): the client's own notifications, each linking to the record in the portal.
   const clientNotifications: Db['notifications'] = (() => {
     const abc = 'client@abclogistics.ph';
@@ -539,6 +595,7 @@ export function buildSeed(): Db {
     contracts,
     cashBonds: [
       { id: 'CB-1', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', amount: 20000, dateReceived: ago(205).slice(0, 10), receiptRef: 'OR-MNL-00000301', status: 'Held', withdrawals: [] },
+      { id: 'CB-5', clientCode: 'C-00262', contractNo: 'QLP-2026-0003', amount: 20000, dateReceived: ago(205).slice(0, 10), receiptRef: 'OR-MNL-00000300', status: 'Held', withdrawals: [], paymentMethod: 'Bank transfer', receivedBy: 'TREAS' },
       { id: 'CB-2', clientCode: 'C-00188', contractNo: 'SPL-2026-0012', amount: 20000, dateReceived: ago(190).slice(0, 10), receiptRef: 'OR-MNL-00000318', status: 'Held', withdrawals: [] },
       { id: 'CB-3', clientCode: 'C-00201', contractNo: 'LTL-2026-0051', amount: 20000, dateReceived: ago(180).slice(0, 10), receiptRef: 'OR-CEB-00000044', status: 'Withdrawal Pending',
         withdrawals: [{ id: 'CBW-1', amount: 18880, reason: 'Client consolidating fleet; requests early release of the bond', refundable: 18880, workflowId: 'WF-CBW-1', status: 'Pending', requestedAt: ago(2), earlyException: true }] },
@@ -593,12 +650,19 @@ export function buildSeed(): Db {
         status: 'Closed by R&M', isMajor: false, chargeable: false, bom: [{ partCode: 'SUS-LEAF', description: 'Leaf spring assembly', qty: 1, unitCost: 9800 }], labor: [{ worker: 'Laborer A', hours: 4, rate: 95, date: ago(12).slice(0, 10), shift: 'Morning' }, { worker: 'Laborer B', hours: 3, rate: 110, date: ago(12).slice(0, 10), shift: 'Afternoon' }], createdAt: ago(14), createdBy: 'BG.MNL', closedAt: ago(11) },
     ],
     rescues: [
+      // Portal Rescue review: a request on its way (Dispatched) with crew, vehicle, driver, ETA, the status times and who was notified.
+      ...(rsc42Unit ? [{ rescueNo: 'RSC-000042', clientCode: 'C-00123', chassisNo: rsc42Unit.chassisNo, locationText: 'STAR Tollway southbound km 82, near Lipa exit', incident: 'Tail and brake lights not working after a hard bump', sceneContactName: 'Ramil Santos', sceneContactPhone: '+63 917 444 1212',
+        urgent: false, status: 'Dispatched' as const, requestedAt: addHours(now(), -0.9), requestedVia: 'Portal' as const, branchCode: rsc42Unit.branchCode, chargeable: true, problemType: 'Electrical / lights', loadStatus: 'Loaded' as const,
+        verifiedBy: 'CNC.OFF1', confirmedBy: 'AE.JREYES', crew: 'In-house crew', rescueVehicle: 'Service van NCR 4521', driverName: 'Romeo Santos', driverPhone: '+63 917 555 0101', dispatchedAt: addHours(now(), -0.55), eta: addHours(now(), 0.45),
+        statusLog: [{ status: 'Requested', at: addHours(now(), -0.9), by: 'client@abclogistics.ph' }, { status: 'Verified', at: addHours(now(), -0.8), by: 'CNC.OFF1' }, { status: 'Confirmed', at: addHours(now(), -0.7), by: 'AE.JREYES' }, { status: 'Dispatched', at: addHours(now(), -0.55), by: 'OPSMGR' }],
+        notified: rescueNotes(addHours(now(), -0.9), false, rsc42Unit.branchCode) }] : []),
       { rescueNo: 'RSC-000041', clientCode: 'C-00123', chassisNo: onHire[0]?.chassisNo ?? '', locationText: 'SLEX northbound km 32, near Sta. Rosa exit', incident: 'Blown tire, rear axle', sceneContactName: 'Juan Dela Cruz', sceneContactPhone: '+63 917 222 3344',
         urgent: true, status: 'Requested', requestedAt: addHours(now(), -1), requestedVia: 'Portal', branchCode: 'MNL', chargeable: true,
-        problemType: 'Flat / blown tire', loadStatus: 'Loaded', photos: ['rsc41-blown-tire.jpg', 'rsc41-location.jpg'] }, // review 1.1: load status was blank
+        problemType: 'Flat / blown tire', loadStatus: 'Loaded', photos: ['rsc41-blown-tire.jpg', 'rsc41-location.jpg'], notified: rescueNotes(addHours(now(), -1), true) }, // review 1.1: load status was blank
       // Review 1.1: RSC-000020 is the ₱18,048.80 e-wallet deduction (EWT-2). BR-11: travel 20 km × 2 × ₱50 = 2,000 + parts 12,650 (BRK-DRUM 8,280 + BRK-PAD 4,370)
       // = 14,650 + 10% service 1,465 = 16,115 + 12% VAT 1,933.80 = 18,048.80.
-      { rescueNo: 'RSC-000020', clientCode: 'C-00123', chassisNo: onHire.filter((c) => c.currentClientCode === 'C-00123')[1]?.chassisNo ?? onHire[0]?.chassisNo ?? '', locationText: 'NLEX northbound km 40, Marilao', incident: 'Brake drum cracked, rear axle locking',
+      // Portal Rescue review: RSC-000020 (60 days ago) was on the unit hired under MNL0880 (75 → 35 days ago), not on a unit hired since October.
+      { rescueNo: 'RSC-000020', clientCode: 'C-00123', chassisNo: gatePasses.find((g) => g.gatePassNo === 'MNL0880')?.chassisNo ?? onHire[0]?.chassisNo ?? '', locationText: 'NLEX northbound km 40, Marilao', incident: 'Brake drum cracked, rear axle locking',
         sceneContactName: 'Juan Dela Cruz', sceneContactPhone: '+63 917 222 3344', urgent: false, status: 'Completed', requestedAt: addHours(ago(60), -5), requestedVia: 'Portal', branchCode: 'MNL', problemType: 'Brake problem',
         verifiedBy: 'CNC.OFF1', confirmedBy: 'AE.JREYES', crew: 'In-house crew', rescueVehicle: 'Service van NCR 4521', driverName: 'Romeo Santos', driverPhone: '+63 917 555 0101',
         dispatchedAt: addHours(ago(60), -4.5), eta: addHours(ago(60), -3.5), completedAt: addHours(ago(60), -1),
@@ -613,11 +677,13 @@ export function buildSeed(): Db {
         costLines: [{ kind: 'Part', partCode: 'BRK-PAD', description: 'Brake lining set', qty: 1, unitPrice: 4370 }], onsiteAssessment: 'Rear brake seized; lining replaced on site, unit driven to yard.',
         beforePhotos: ['rsc38-before-1.jpg'], afterPhotos: ['rsc38-after-1.jpg'], clientAckName: 'Pedro Penduko', acknowledgedAt: addHours(ago(6), 3.25), ewalletBalanceAfter: 9398.56 },
       { rescueNo: 'RSC-000040', clientCode: 'C-00123', chassisNo: onHire[5]?.chassisNo ?? '', locationText: 'NLEX southbound km 21, Valenzuela', incident: 'Flat tire, front axle', sceneContactName: 'Mark Villanueva', sceneContactPhone: '+63 917 333 4455',
+        // Portal Rescue review: problem type recorded (it was blank on this cancelled request).
+        problemType: 'Flat / blown tire',
         urgent: true, status: 'Cancelled', requestedAt: ago(2), requestedVia: 'Portal', branchCode: onHire[5]?.branchCode ?? 'MNL', chargeable: true, loadStatus: 'Empty', urgentAckBy: 'OPSMGR', urgentAckAt: addHours(ago(2), 0.2),
         cancelReason: 'Client driver fixed the tire on site; rescue no longer needed.', cancelledBy: 'OPSMGR', cancelledAt: addHours(ago(2), 0.75) },
       // Hold client blocked at intake (BR-01): logged for audit, never reaches C&C verification.
       { rescueNo: 'RSC-000037', clientCode: 'C-00188', chassisNo: onHire[1]?.chassisNo ?? '', locationText: 'Marcos Highway, Antipolo', incident: 'Air leak, brakes locked', sceneContactName: 'Leo Navarro', sceneContactPhone: '+63 917 777 8899',
-        urgent: false, status: 'Blocked', blockedReason: 'Pacific Movers Corp. is ON HOLD for overdue balance. Chassis release, gate pass, repair scheduling and new services are blocked (BR-01).', blockedAt: addHours(now(), -5), requestedAt: addHours(now(), -5), requestedVia: 'Portal', branchCode: onHire[1]?.branchCode ?? 'MNL', chargeable: true, loadStatus: 'Loaded' },
+        urgent: false, status: 'Blocked', blockedReason: 'Pacific Movers Corp. is ON HOLD for overdue balance. Chassis release, gate pass, repair scheduling and new services are blocked (BR-01).', blockedAt: addHours(now(), -5), requestedAt: addHours(now(), -5), requestedVia: 'Internal', branchCode: onHire[1]?.branchCode ?? 'MNL', chargeable: true, loadStatus: 'Loaded', problemType: 'Brake problem' }, // phoned in; the portal refuses requests while on hold
       { rescueNo: 'RSC-000039', clientCode: 'C-00201', chassisNo: onHire[2]?.chassisNo ?? '', locationText: 'CAVITEX km 14, Kawit', incident: 'Landing leg damaged, cannot detach', sceneContactName: 'Ramon Cruz', sceneContactPhone: '+63 917 444 5566',
         urgent: false, status: 'Dispatched', requestedAt: addHours(now(), -3), requestedVia: 'Internal', branchCode: onHire[2]?.branchCode ?? 'CEB', chargeable: true, loadStatus: 'Loaded', verifiedBy: 'CNC.OFF1', confirmedBy: 'AE.JREYES',
         crew: 'In-house crew', rescueVehicle: 'Wrecker CAV-02 (NBC 7788)', driverName: 'Jun Reyes', driverPhone: '+63 917 666 7788', dispatchedAt: addHours(now(), -2.5) },
@@ -649,10 +715,16 @@ export function buildSeed(): Db {
       { clientCode: 'C-00188', balance: -2500, minimumBalance: 10000, createdAt: ago(190) },
       { clientCode: 'C-00201', balance: 45000, minimumBalance: 10000, createdAt: ago(170) },
       { clientCode: 'C-00230', balance: 9398.56, minimumBalance: 10000, createdAt: ago(150) },
+      { clientCode: 'C-00262', balance: 2350, minimumBalance: 10000, createdAt: ago(200) },
     ],
     ewalletTxns: [
       { id: 'EWT-1', clientCode: 'C-00123', at: ago(200), type: 'Replenishment', amount: 30000, balanceAfter: 30000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000290', receiptNo: 'OR-MNL-00000290', treasuryRef: 'TRS-2026-0112', category: 'Top-up', reason: 'Initial funding (Treasury confirmed)', by: 'ACCTG' },
       { id: 'EWT-2', clientCode: 'C-00123', at: ago(60), type: 'Deduction', amount: -18048.8, balanceAfter: 11951.2, referenceType: 'Rescue', referenceId: 'RSC-000020', category: 'Rescue', by: 'system' },
+      // Portal E-wallet review: DM-000039 was first deducted, then reversed at the client's request — it will be billed on an invoice instead.
+      { id: 'EWT-10', clientCode: 'C-00123', at: ago(11.5), type: 'Deduction', amount: -2800, balanceAfter: 9151.2, referenceType: 'Debit Memo', referenceId: 'DM-000039', category: 'Debit Memo', by: 'ACCTG', reversedById: 'EWT-11' },
+      { id: 'EWT-11', clientCode: 'C-00123', at: ago(11), type: 'Reversal', amount: 2800, balanceAfter: 11951.2, referenceType: 'Reversal', referenceId: 'EWT-10', reversesId: 'EWT-10', category: 'Reversal', reason: 'Client asked to settle DM-000039 on its next invoice instead — deduction reversed', by: 'ACCTG' },
+      { id: 'EWT-12', clientCode: 'C-00262', at: ago(200), type: 'Replenishment', amount: 10000, balanceAfter: 10000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000299', receiptNo: 'OR-MNL-00000299', category: 'Top-up', reason: 'Initial funding (Treasury confirmed)', by: 'ACCTG' },
+      { id: 'EWT-13', clientCode: 'C-00262', at: ago(90), type: 'Deduction', amount: -7650, balanceAfter: 2350, referenceType: 'Repair', referenceId: 'JO-NVL-000077', category: 'Repair', reason: 'Chargeable tire replacement', by: 'system' },
       { id: 'EWT-3', clientCode: 'C-00230', at: ago(150), type: 'Replenishment', amount: 17000, balanceAfter: 17000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000305', receiptNo: 'OR-MNL-00000305', treasuryRef: 'TRS-2026-0140', category: 'Top-up', by: 'ACCTG' },
       { id: 'EWT-4', clientCode: 'C-00230', at: ago(6), type: 'Deduction', amount: -7601.44, balanceAfter: 9398.56, referenceType: 'Debit Memo', referenceId: 'DM-000040', category: 'Rescue', by: 'system' },
       { id: 'EWT-5', clientCode: 'C-00188', at: ago(190), type: 'Replenishment', amount: 10000, balanceAfter: 10000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000317', receiptNo: 'OR-MNL-00000317', treasuryRef: 'TRS-2026-0128', category: 'Top-up', by: 'ACCTG' },
@@ -661,7 +733,12 @@ export function buildSeed(): Db {
       { id: 'EWT-8', clientCode: 'C-00201', at: ago(30), type: 'Deduction', amount: -5200, balanceAfter: 39800, referenceType: 'Repair', referenceId: 'JO-MNL-000470', category: 'Repair', by: 'system', reversedById: 'EWT-9' },
       { id: 'EWT-9', clientCode: 'C-00201', at: ago(29), type: 'Reversal', amount: 5200, balanceAfter: 45000, referenceType: 'Reversal', referenceId: 'EWT-8', reversesId: 'EWT-8', category: 'Reversal', reason: 'Posted against a non-chargeable JO (JO-MNL-000470) - reversed', by: 'ACCTG' },
     ],
-    topups: [{ id: 'TU-1', clientCode: 'C-00230', amount: 20000, proofFileName: 'bank-transfer.pdf', status: 'Submitted', submittedAt: ago(0.2) }],
+    topups: [
+      { id: 'TU-000003', clientCode: 'C-00230', amount: 20000, proofFileName: 'bank-transfer.pdf', status: 'Submitted', submittedAt: ago(0.2), paymentRef: 'TRX-20261111-0193', method: 'Bank transfer (InstaPay)', sendingBank: 'Client bank', transferDate: ago(0.3).slice(0, 10) },
+      // Portal top-up review: a rejected request with its reason — the client can resubmit it with the corrected details.
+      { id: 'TU-000002', clientCode: 'C-00123', amount: 5000, proofFileName: 'transfer-oct21.png', status: 'Rejected', submittedAt: ago(20), paymentRef: 'TRX-20261021-0042', method: 'Bank transfer (PESONet)', sendingBank: 'Client bank', transferDate: ago(20).slice(0, 10),
+        rejectedBy: 'TREAS', rejectedAt: ago(19), rejectReason: 'No matching credit in the Delbros account for this reference and amount. Check the reference on your bank confirmation and resubmit.' },
+    ],
     registrations,
     workflows: [...workflows, {
       id: 'WF-PR-1', matrixCode: 'PR_PO', title: 'Purchase request PR-000210 — tires', subjectType: 'pr', subjectId: 'PR-000210', amount: 290000, requestedBy: 'BG.MNL', requestedAt: ago(2), status: 'Pending', currentStep: 0,
@@ -674,7 +751,10 @@ export function buildSeed(): Db {
     }, ...adminWorkflows],
     notificationRules,
     notifications: [...clientNotifications, ...adminNotifications],
-    audit: [{ id: 'A-1', at: ago(15), actor: 'system', action: 'client.hold.applied', entityType: 'client', entityId: 'C-00188', after: { status: 'Hold' }, reason: 'Invoice INV-MNL-00001050 unpaid 31 days past due (BR-02)' }],
+    audit: [
+      { id: 'A-EWA-765', at: addHours(now(), -58), actor: 'BG.MNL', action: 'ewa.cancelled', entityType: 'ewa', entityId: 'EU-000765', branchCode: 'CAV', before: { status: 'Active' }, after: { status: 'Cancelled' }, reason: 'Client cancelled the pickup — trucker unavailable', source: 'Staff app' },
+      { id: 'A-EWA-770', at: addHours(now(), -16), actor: 'system', action: 'ewa.expired', entityType: 'ewa', entityId: 'EU-000770', branchCode: 'MNL', before: { status: 'Active' }, after: { status: 'Expired', lapsedUnits: 1 }, reason: 'Validity ended (BR-06)', source: 'System' },
+      { id: 'A-1', at: ago(15), actor: 'system', action: 'client.hold.applied', entityType: 'client', entityId: 'C-00188', after: { status: 'Hold' }, reason: 'Invoice INV-MNL-00001050 unpaid 31 days past due (BR-02)' }],
     settings: DEFAULT_SETTINGS.map((s) => ({ ...s })),
     // Park & Fix stores CLIENT-OWNED trailers (not in the Delbros fleet, so never in Available / DCIR fleet totals).
     parkFix: [
@@ -693,6 +773,10 @@ export function buildSeed(): Db {
       { reqNo: 'UR-000028', clientCode: 'C-00215', contractNo: 'QLP-2026-0007', branchCode: 'BTG', equipmentType: 'EQ5', qty: 1, targetPickupDate: ahead(7).slice(0, 10), requiredParts: 'Extra spare tire', allocated: [], status: 'Open', createdAt: ago(4), createdBy: 'AE.JREYES' },
     ],
     crossBranchCodes: crossBranch,
-    seq: { EU: 781, GP: 2000, EIR: 500, JO: 520, RSC: 41, INV: 1200, OR: 460, CM: 10, DM: 40, PR: 210, PO: 155, RR: 60, RFP: 30, PCV: 88, CT: 70, CL: 260, WF: 10, LE: 1, SOA: 318, STK: 120,EWT: 10, HL: 1 },
+    contractRequests: [
+      { id: 'CRQ-000001', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', kind: 'Amendment', changeArea: 'Branches covered', details: 'Add Batangas, Clark and Cagayan de Oro — our trucks now pick up from these depots.',
+        status: 'Approved', submittedAt: ago(160), submittedBy: 'client@abclogistics.ph', decidedAt: ago(155), decidedBy: 'AE.JREYES', decisionNote: 'Branches added to the account (CWS access); rates unchanged.' },
+    ],
+    seq: { EU: 781, GP: 2000, EIR: 500, JO: 520, RSC: 42, TU: 3, CRQ: 1, INV: 1200, OR: 460, CM: 10, DM: 40, PR: 210, PO: 155, RR: 60, RFP: 30, PCV: 88, CT: 70, CL: 260, WF: 10, LE: 1, SOA: 318, STK: 120,EWT: 10, HL: 1 },
   };
 }

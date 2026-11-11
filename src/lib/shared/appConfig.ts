@@ -7,7 +7,9 @@ export interface AppConfig { appName?: string; portalUrl?: string; staffUrl?: st
    * System-settings values on the sign-in page, the portal footer, restriction messages and the privacy notice — no rebuild needed.
    */
   releaseContacts?: ReleaseContacts }
-export interface ReleaseContacts { client?: { phone?: string; email?: string }; vendor?: { phone?: string; email?: string }; dpoEmail?: string }
+export interface ReleaseContacts { client?: { phone?: string; email?: string }; vendor?: { phone?: string; email?: string }; dpoEmail?: string;
+  /** Delbros account clients pay into (e-wallet top-ups, invoice payments) — shown on the E-wallet page and the top-up dialog. */
+  payee?: { bank: string; accountName: string; accountNo: string; branch?: string } }
 let cached: Promise<AppConfig> | null = null;
 
 export function loadAppConfig(): Promise<AppConfig> {

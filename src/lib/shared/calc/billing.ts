@@ -118,3 +118,10 @@ export function hireDays(outIso: string, inIso?: string) {
   const calendar = Math.max(0, manilaDayIndex(end) - manilaDayIndex(outIso));
   return { calendar, billable: calendar + 1 };
 }
+
+/** Portal top-up review (2026-11-11): request rules — proposed, Treasury to confirm. Centavos are allowed (2 decimals). */
+export const TOPUP_RULES = { min: 500, max: 5_000_000, maxFileMb: 5, maxAgeDays: 60 } as const;
+/** Ways a client may pay Delbros (proposed — Treasury to confirm which are accepted). */
+export const TOPUP_METHODS = ['Bank transfer (InstaPay)', 'Bank transfer (PESONet)', 'Online banking — same bank', 'Over-the-counter deposit', 'Check deposit'] as const;
+/** Reference the client quotes on the transfer so Treasury can match it: EW- plus the account code. */
+export const topupReference = (clientCode: string) => `EW-${clientCode.replace(/[^A-Z0-9]/gi, '')}`;

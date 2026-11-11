@@ -39,6 +39,13 @@ export function portalPolicy() {
       vendor: { role: 'Delbros Procurement', phone: pick(release.vendor?.phone, 'portal.vendor_support_phone'), email: pick(release.vendor?.email, 'portal.vendor_support_email') } as PortalContact,
     },
     dpoEmail: pick(release.dpoEmail, 'portal.dpo_email'),
+    // Portal top-up review: the account clients pay into. Approved values come from app-config.json (releaseContacts.payee) or
+    // System settings (co.payee_bank); until then a clearly marked demo placeholder is shown.
+    payee: release.payee?.accountNo
+      ? { ...release.payee, isDemo: false }
+      : text('co.payee_bank')
+        ? { bank: text('co.payee_bank'), accountName: 'Delbros Leasing Inc.', accountNo: '', isDemo: false }
+        : { bank: 'Demo Bank (replace before release)', accountName: 'Delbros Leasing Inc.', accountNo: '0000-0000-0000', branch: 'Head Office', isDemo: true },
   };
 }
 

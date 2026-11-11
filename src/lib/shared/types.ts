@@ -107,6 +107,20 @@ export interface Contract {
   history?: ContractEvent[];
   documents?: { kind: 'Signed copy' | 'Notarized copy' | 'Amendment'; fileName: string; at: string; by: string }[];
   versions?: { version: number; at: string; by: string; reason: string }[];
+  /**
+   * Portal Contracts review (2026-11-11): entitlement is set for every equipment type (0 = not entitled, available on request);
+   * earlier versions of the rates (BR-18); the minimum billing days if the contract sets them.
+   */
+  entitlementByType?: boolean;
+  rateHistory?: { version: number; validFrom: string; validTo?: string; reason: string; rates: { equipmentType: string; dailyRate: number }[] }[];
+  minBillingDays?: number;
+}
+/** Portal Contracts review: a renewal, amendment or termination request sent from the portal, with its status. */
+export interface ContractRequest {
+  id: string; clientCode: string; contractNo: string; kind: 'Renewal' | 'Amendment' | 'Termination';
+  details: string; termMonths?: number; changeArea?: string; effectiveDate?: string; feeEstimate?: number;
+  status: 'Submitted' | 'Under review' | 'Approved' | 'Declined' | 'Withdrawn'; submittedAt: string; submittedBy: string;
+  decidedAt?: string; decidedBy?: string; decisionNote?: string;
 }
 
 export interface CashBond {
@@ -157,8 +171,14 @@ export interface Ewa {
    * expected pickup time and remarks, and the delivery log of the full-detail EWA email (GAT-002, notification N08).
    */
   truckOrcr?: string; expectedPickupAt?: string; remarks?: string; delivery?: EwaDelivery[];
+  /** Portal EWA list review (2026-11-11): every extension request with its decision and the valid-until change (GAT-003, BR-06). */
+  extensions?: EwaExtension[];
 }
-export interface EwaDelivery { at: string; channel: 'Email' | 'In-app'; audience: 'Client' | 'Delbros'; recipient: string; to: string; status: 'Sent' | 'Queued' | 'Failed'; resend?: boolean }
+export interface EwaExtension {
+  requestedAt: string; requestedBy: string; reason: string; workflowId?: string; status: 'Pending' | 'Approved' | 'Rejected';
+  decidedAt?: string; decidedBy?: string; validUntilBefore: string; validUntilAfter?: string;
+}
+export interface EwaDelivery { at: string; channel: 'Email' | 'SMS' | 'In-app'; audience: 'Client' | 'Delbros'; recipient: string; to: string; status: 'Sent' | 'Queued' | 'Failed'; resend?: boolean }
 export interface EwaCredentials { trucker: string; driverName: string; driverLicenseNo: string; truckPlateNo: string }
 
 export interface InspectionLine { part: string; branding?: string; threadDepth?: string; statusCode: string; qty: number; chargeable: number }
@@ -213,6 +233,8 @@ export interface RescueRequest {
   cancelReason?: string; cancelledBy?: string; cancelledAt?: string;
   /** Portal review 1.1: problem type chosen by the client (flat tire, brake, mechanical, accident, other) — helps the dispatcher plan crew and parts. */
   problemType?: string;
+  /** Portal Rescue review (2026-11-11): free text when the problem type is Other; each status change with its time; who was notified on submission. */
+  problemDetail?: string; statusLog?: { status: string; at: string; by?: string }[]; notified?: EwaDelivery[];
 }
 /** Portal review 1.1 (DBL-CLT-017): client feedback and contract requests (renewal / amendment / termination) sent to the Account Executive. */
 export interface ClientFeedback {
@@ -319,7 +341,21 @@ export interface Ewallet {
 export type EwalletCategory = 'Top-up' | 'Rescue' | 'Repair' | 'Debit Memo' | 'Contract-termination lease' | 'Reversal' | 'Adjustment';
 export interface EwalletTxn { id: string; clientCode: string; at: string; type: EwalletTxnType; amount: number; balanceAfter: number; referenceType: string; referenceId?: string; reason?: string; by: string; category?: EwalletCategory; receiptNo?: string; treasuryRef?: string; reversesId?: string; reversedById?: string; workflowId?: string }
 export interface TopupRequest { id: string; clientCode: string; amount: number; proofFileName?: string; status: 'Submitted' | 'Confirmed by Treasury' | 'Posted' | 'Rejected'; submittedAt: string; bankRef?: string; paymentRef?: string;
-  receiptNo?: string; confirmedBy?: string; confirmedAt?: string; postedBy?: string; postedAt?: string; txnId?: string; rejectedBy?: string; rejectedAt?: string; rejectReason?: string }
+  receiptNo?: string; confirmedBy?: string; confirmedAt?: string; postedBy?: string; postedAt?: string; txnId?: string; rejectedBy?: string; rejectedAt?: string; rejectReason?: string;
+  /** Portal top-up review (2026-11-11): what Treasury needs to match the transfer, the resubmission link and who was told. */
+  transferDate?: string; method?: string; sendingBank?: string; remarks?: string; resubmitOf?: string; notified?: EwaDelivery[] }
+/**
+ * Portal invoice review (2026-11-11, proposed — Delbros to confirm scope): the client tells Accounting it has paid an invoice
+ * (proof of payment), or disputes an invoice. Neither changes the balance — Accounting verifies and records the receipt or memo.
+ */
+export interface PaymentAdvice {
+  id: string; clientCode: string; invoiceNo: string; amount: number; paidOn: string; method: string; bank?: string; reference: string; proofFileName: string;
+  remarks?: string; status: 'Submitted' | 'Verified' | 'Rejected'; submittedAt: string; submittedBy: string; receiptNo?: string; rejectReason?: string;
+}
+export interface InvoiceDispute {
+  id: string; clientCode: string; invoiceNo: string; reason: string; details: string; amountDisputed?: number; attachment?: string;
+  status: 'Submitted' | 'Under review' | 'Resolved' | 'Rejected'; submittedAt: string; submittedBy: string; resolution?: string;
+}
 
 export interface Registration {
   id: string; subjectType: 'Chassis' | 'Trailer' | 'Vehicle' | 'Asset' | 'Motorcycle' | 'Prime Mover'; subjectId: string; plateNo: string; orNo: string; crNo: string;

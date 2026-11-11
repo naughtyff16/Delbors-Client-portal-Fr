@@ -147,6 +147,7 @@ const DEMO_ACCOUNTS: { realm: PortalRealm; email: string; state: string; tone: '
   { realm: 'CLIENT_PORTAL', email: 'tess@islandlink.ph', state: 'Access request pending', tone: 'bad' },
   { realm: 'CLIENT_PORTAL', email: 'j.cruz@abclogistics.ph', state: 'Inactive user', tone: 'bad' },
   { realm: 'CLIENT_PORTAL', email: 'dispatch@visayasfreight.ph', state: 'Locked', tone: 'bad' },
+  { realm: 'CLIENT_PORTAL', email: 'finance@baysidehaulage.ph', state: 'Contract ended — cash bond refundable (withdrawal)', tone: 'ok' },
   { realm: 'VENDOR_PORTAL', email: 'vendor@tirepro.ph', state: 'Active — Tire Pro Supply', tone: 'ok' },
   { realm: 'VENDOR_PORTAL', email: 'sales@luzonbrake.ph', state: 'Not accredited', tone: 'bad' },
   { realm: 'VENDOR_PORTAL', email: 'orders@metropaint.ph', state: 'Inactive supplier', tone: 'bad' },

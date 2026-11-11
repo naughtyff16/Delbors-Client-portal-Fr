@@ -27,3 +27,18 @@ export function rescueLineTotals(lines: RescueLineInput[]): { tireCost: number; 
 export function rescueSlaTone(elapsedMin: number, amberHours = 2, redHours = 4): 'ok' | 'amber' | 'red' {
   return elapsedMin >= redHours * 60 ? 'red' : elapsedMin >= amberHours * 60 ? 'amber' : 'ok';
 }
+
+/**
+ * Portal Rescue review (2026-11-11): the problem types a client can choose and which BR-11 cost lines each usually brings
+ * (proposed — Operations to confirm). Travel (km × 2 × rate), the 10% service fee and 12% VAT apply to every rescue;
+ * the type only tells the dispatcher what to bring — the charge is always from the actual tires and parts used.
+ */
+export const RESCUE_PROBLEM_TYPES = [
+  { value: 'Flat / blown tire', pricing: 'Travel + tire (from the tire price list)', drives: 'Tires' },
+  { value: 'Brake problem', pricing: 'Travel + brake parts (drum, lining)', drives: 'Parts' },
+  { value: 'Mechanical breakdown', pricing: 'Travel + parts used on site', drives: 'Parts' },
+  { value: 'Electrical / lights', pricing: 'Travel + electrical parts (lamps, wiring)', drives: 'Parts' },
+  { value: 'Accident / collision', pricing: 'Travel + tires and parts assessed on site', drives: 'Tires and parts' },
+  { value: 'Other', pricing: 'Travel + tires or parts assessed on site', drives: 'Assessed on site' },
+] as const;
+export const RESCUE_PROBLEM_OTHER = 'Other';

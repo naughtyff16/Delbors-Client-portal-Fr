@@ -68,6 +68,7 @@ for (const t of targets) {
     const demo = /demo\.delbros\.local|\+63 917 000 0000|\+63 2 8000 [12]000/;
     const missing = [['client.phone', rc.client?.phone], ['client.email', rc.client?.email], ['vendor.phone', rc.vendor?.phone], ['vendor.email', rc.vendor?.email], ['dpoEmail', rc.dpoEmail]]
       .filter(([, v]) => !v || demo.test(String(v))).map(([k]) => k);
+    if (!rc.payee?.accountNo) missing.push('payee (bank account clients pay into)');
     if (missing.length) console.warn(`⚠ app-config.json "releaseContacts" is missing or still has demo values for: ${missing.join(', ')}. The portal will show the demo support contacts — add the approved release contacts before production.`);
   } catch { /* no app-config.json in the build — demo box stays hidden */ }
 }

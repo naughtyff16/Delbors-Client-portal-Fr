@@ -5,7 +5,7 @@ import {
   type Assessment, type Client, type Contract, type ContractType, type EwaForm, type GateAction, type Grants, type InspectionLine,
   type Invoice, type JobOrder, type NotificationRule, type RepairCategory, type RescueRequest, type RoleCode, type StockTxnType, type User,
   type ClientInternalForm, type ClientPortalForm, type RescueRequestForm, type PaymentStatus, type AgingBuckets,
-  type EwalletCategory, type EwalletTxn, nextCollectionStage, hireDays, PLATE_RE, LICENCE_RE, type Ewa, type EwaDelivery,
+  type EwalletCategory, type EwalletTxn, type TopupRequest, TOPUP_RULES, nextCollectionStage, MIN_BILLING_DAYS, preTerminationFee, renewalNoticeDates, hireDays, RESCUE_PROBLEM_TYPES, RESCUE_PROBLEM_OTHER, PLATE_RE, LICENCE_RE, type Ewa, type EwaDelivery,
 } from '../shared';
 import {
   ApiError, audit, canActOn, db, decide, delay, inScope, me, nextNo, notify, onWorkflowDone, persist, requirePerm, session, setSession,
@@ -75,8 +75,10 @@ export function ewaEntitlement(ct: Contract) {
     types: ct.rates.map((r) => {
       const oh = onHire.filter((x) => x.chassisType === r.equipmentType).length;
       const pd = pendingOf(r.equipmentType);
-      const typeLeft = r.qty ? Math.max(0, r.qty - oh - pd) : undefined;
-      return { equipmentType: r.equipmentType, entitled: r.qty || undefined, onHire: oh, pending: pd, dailyRate: r.dailyRate, remaining: typeLeft == null ? contractRemaining : Math.min(typeLeft, contractRemaining) };
+      // Contracts review: when the contract sets entitlement for every type, 0 means not entitled (on request); older contracts treat 0 as no per-type cap.
+      const perType = !!ct.entitlementByType || !!r.qty;
+      const typeLeft = perType ? Math.max(0, (r.qty ?? 0) - oh - pd) : undefined;
+      return { equipmentType: r.equipmentType, entitled: perType ? (r.qty ?? 0) : undefined, onHire: oh, pending: pd, dailyRate: r.dailyRate, remaining: typeLeft == null ? contractRemaining : Math.min(typeLeft, contractRemaining) };
     }),
   };
 }
@@ -94,6 +96,38 @@ function ewaDelivery(e: Ewa, c: Client, resend = false): EwaDelivery[] {
   db.users.filter((x) => x.realm === 'INTERNAL' && x.status === 'Active' && x.roles.includes('BRANCH_GENERALIST') && x.branchCode === e.branchCode).forEach((x) => add('Delbros', `${x.name} — Branch Generalist, ${e.branchCode}`, x.email));
   const ae = db.users.find((x) => x.userId === c.aeAssigned);
   if (ae) add('Delbros', `${ae.name} — Account Executive`, ae.email);
+  return out;
+}
+
+// ── Portal Rescue review (2026-11-11) ──────────────────────────────────────
+/** Records each rescue status change with its time (the client's status timeline). */
+function logRescue(r: RescueRequest) {
+  const last = r.statusLog?.[r.statusLog.length - 1];
+  if (last?.status !== r.status) (r.statusLog ??= []).push({ status: r.status, at: nowIso(), by: session()?.userId });
+}
+/** Status times for the timeline: the recorded log, or (older records) the times kept on the request itself. */
+function rescueTimeline(r: RescueRequest) {
+  if (r.statusLog?.length) return r.statusLog;
+  const t: { status: string; at: string }[] = [{ status: 'Requested', at: r.requestedAt }];
+  if (r.dispatchedAt) t.push({ status: 'Dispatched', at: r.dispatchedAt });
+  if (r.completedAt) t.push({ status: 'Completed', at: r.completedAt });
+  if (r.cancelledAt) t.push({ status: 'Cancelled', at: r.cancelledAt });
+  if (r.blockedAt) t.push({ status: 'Blocked', at: r.blockedAt });
+  return t;
+}
+/**
+ * Who is told about a new rescue request: the dispatchers (email, plus SMS when urgent), Credit & Collection for the eligibility
+ * check, the branch and the Account Executive; the client gets a confirmation email. The mock records each send as Sent.
+ */
+function rescueNotified(r: RescueRequest, c: Client): EwaDelivery[] {
+  const at = nowIso(); const out: EwaDelivery[] = [];
+  const add = (audience: EwaDelivery['audience'], recipient: string, to: string | undefined, channel: EwaDelivery['channel'] = 'Email') => { if (to && !out.some((d) => d.to === to && d.channel === channel)) out.push({ at, channel, audience, recipient, to, status: 'Sent' }); };
+  const internal = (role: string) => db.users.filter((x) => x.realm === 'INTERNAL' && x.status === 'Active' && x.roles.includes(role as RoleCode));
+  for (const d of internal('RESCUE_COORDINATOR')) { add('Delbros', `${d.name} — dispatcher`, d.email); if (r.urgent) add('Delbros', `${d.name} — dispatcher`, d.mobile, 'SMS'); }
+  for (const x of internal('CNC_OFFICER')) add('Delbros', `${x.name} — Credit & Collection (eligibility check)`, x.email);
+  for (const x of internal('BRANCH_GENERALIST').filter((x) => x.branchCode === r.branchCode)) add('Delbros', `${x.name} — Branch Generalist, ${r.branchCode}`, x.email);
+  const ae = db.users.find((x) => x.userId === c.aeAssigned); if (ae) add('Delbros', `${ae.name} — Account Executive`, ae.email);
+  const by = session(); if (by?.realm === 'CLIENT_PORTAL') add('Client', `${by.name} (confirmation)`, by.email);
   return out;
 }
 
@@ -225,7 +259,13 @@ onWorkflowDone('LATE_ENCODING_CM', (wf, ok) => {
 });
 onWorkflowDone('EWA_EXTENSION', (wf, ok) => {
   const e = db.ewas.find((x) => x.euNo === wf.subjectId); if (!e) return;
+  const before = e.validUntil;
   if (ok) { e.status = 'Active'; e.validUntil = addHours(nowIso(), Number(S()['gat.ewa_validity_hours'] ?? 24)); e.extensionCount++; } else e.status = 'Expired';
+  // Portal EWA list review: the decision, who made it and the valid-until change (GAT-003, BR-06).
+  const x = (e.extensions ?? []).find((h) => h.workflowId === wf.id) ?? (e.extensions ?? []).find((h) => h.status === 'Pending');
+  if (x) Object.assign(x, { status: ok ? 'Approved' : 'Rejected', decidedAt: nowIso(), decidedBy: session()?.userId ?? 'system', validUntilAfter: ok ? e.validUntil : before });
+  notify('ewa.extension.decided', `EWA ${e.euNo} extension ${ok ? 'approved' : 'rejected'}`, ok ? `Valid until ${formatDateTime(e.validUntil)}.` : 'The EWA stays expired — create a new EWA if the pickup is still needed.',
+    { extraUsers: db.users.filter((u) => u.realm === 'CLIENT_PORTAL' && u.clientCode === e.clientCode && u.status === 'Active').map((u) => u.userId), link: `/client/ewa?open=${e.euNo}` });
 });
 onWorkflowDone('JOB_ORDER', (wf, ok) => {
   const jo = db.jobOrders.find((j) => j.joNo === wf.subjectId); if (!jo) return;
@@ -440,7 +480,13 @@ function expireContracts() {
 }
 
 function expireEwas() {
-  for (const e of db.ewas) if (e.status === 'Active' && new Date(e.validUntil) < new Date()) e.status = 'Expired';
+  // Portal EWA list review: a Partially Used EWA also expires at its valid-until time — the units not yet released lapse
+  // (the client requests an extension or a new EWA for them); units already released stay on hire.
+  for (const e of db.ewas) if ((e.status === 'Active' || e.status === 'Partially Used') && new Date(e.validUntil) < new Date()) {
+    const lapsed = e.units.reduce((a, l) => a + Math.max(0, l.qty - l.usedChassis.length), 0);
+    e.status = 'Expired';
+    audit('ewa.expired', 'ewa', e.euNo, { status: 'Expired', lapsedUnits: lapsed }, 'Validity ended (BR-06)');
+  }
 }
 
 // ── Allocation helpers (M05) — every count derives from db.chassis so all screens show one fleet ──
@@ -1325,7 +1371,9 @@ export const api = {
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.euNo.localeCompare(a.euNo)) // review 1.1: newest first by default
         .map((e) => {
           const ext = db.workflows.find((w) => w.matrixCode === 'EWA_EXTENSION' && w.subjectId === e.euNo && w.status === 'Pending');
-          return { ...e, clientName: clientName(e.clientCode), createdByName: db.users.find((x) => x.userId === e.createdBy)?.name ?? e.createdBy,
+          const nameOf = (id?: string) => (id ? db.users.find((x) => x.userId === id)?.name ?? id : undefined);
+          return { ...e, clientName: clientName(e.clientCode), createdByName: nameOf(e.createdBy) ?? e.createdBy, cancelledByName: nameOf(e.cancelledBy),
+            extensions: (e.extensions ?? []).map((x) => ({ ...x, requestedByName: nameOf(x.requestedBy), decidedByName: nameOf(x.decidedBy) })),
             // Review 1.1: gate passes released under this EWA (Gate Pass no., unit, time, truck OR/CR captured at the gate).
             gatePasses: db.gatePasses.filter((g) => g.euNo === e.euNo && g.direction === 'OUT').map((g) => ({ gatePassNo: g.gatePassNo, chassisNo: g.chassisNo, at: g.actualEventAt, truckOrcr: g.truckOrcr })),
             extension: ext ? { workflowId: ext.id, step: ext.currentStep, stepLabel: ext.steps[ext.currentStep]?.label, canAct: u.realm === 'INTERNAL' && canActOn(ext, u) } : undefined };
@@ -1437,7 +1485,8 @@ export const api = {
       if (!reason.trim()) throw new ApiError('VALIDATION_FAILED', 'A reason for the extension is required.', 422, { reason: 'Required' });
       assertGate(e.clientCode, 'EWA_CREATE');
       e.status = 'Extension Pending';
-      startWorkflow('EWA_EXTENSION', `EWA extension — ${euNo}`, 'ewa', euNo, [{ label: 'Manager approval', roles: ['DYM', 'REGIONAL_MANAGER', 'OPS_MANAGER'] }, { label: 'IT / authorised revalidation', roles: ['SYS_ADMIN'] }]);
+      const xwf = startWorkflow('EWA_EXTENSION', `EWA extension — ${euNo}`, 'ewa', euNo, [{ label: 'Manager approval', roles: ['DYM', 'REGIONAL_MANAGER', 'OPS_MANAGER'] }, { label: 'IT / authorised revalidation', roles: ['SYS_ADMIN'] }]);
+      (e.extensions ??= []).push({ requestedAt: nowIso(), requestedBy: me().userId, reason: reason.trim(), workflowId: xwf.id, status: 'Pending', validUntilBefore: e.validUntil });
       audit('ewa.extension_requested', 'ewa', euNo, undefined, reason); persist();
       return true;
     },
@@ -1874,7 +1923,11 @@ export const api = {
         .map((r) => {
           const endAt = r.completedAt ?? r.cancelledAt ?? r.blockedAt ?? (r.status === 'Blocked' ? r.requestedAt : undefined);
           const charge = r.oneWayKm != null ? computeRescueCharge({ oneWayKm: r.oneWayKm, ratePerKm: r.ratePerKm ?? 0, tireCost: r.tireCost ?? 0, partsCost: r.partsCost ?? 0, serviceChargePct: svc, vatPct: vat }) : undefined;
-          return { ...r, clientName: clientName(r.clientCode), isOpen: rescueIsOpen(r), timerStopped: !rescueIsOpen(r),
+          // Portal Rescue review: the Gate Out the unit was on hire under at the time of the request (rescue date vs hire history).
+          const out = db.gatePasses.filter((g) => g.chassisNo === r.chassisNo && g.direction === 'OUT' && g.clientCode === r.clientCode && g.actualEventAt <= r.requestedAt).sort((a, b) => b.actualEventAt.localeCompare(a.actualEventAt))[0];
+          const back = out?.pairedGatePassNo ? db.gatePasses.find((g) => g.gatePassNo === out.pairedGatePassNo) : undefined;
+          const hire = out ? { gatePassNo: out.gatePassNo, branchCode: out.branchCode, from: out.actualEventAt, to: back?.actualEventAt, returnGatePassNo: back?.gatePassNo, euNo: out.euNo } : undefined;
+          return { ...r, clientName: clientName(r.clientCode), isOpen: rescueIsOpen(r), timerStopped: !rescueIsOpen(r), hire, timeline: rescueTimeline(r),
             elapsedMin: !rescueIsOpen(r) && !endAt ? null : Math.max(0, Math.round(((endAt ? new Date(endAt) : new Date()).getTime() - new Date(r.requestedAt).getTime()) / 60000)), charge };
         }));
     },
@@ -1887,16 +1940,35 @@ export const api = {
           debitMemo: r.debitMemoNo ? db.memos.find((m) => m.memoNo === r.debitMemoNo) : undefined };
       });
     },
-    async request(f: RescueRequestForm & { clientCode?: string; lat?: number; lng?: number; loadStatus?: 'Loaded' | 'Empty'; photos?: string[]; problemType?: string }) {
+    async request(f: RescueRequestForm & { clientCode?: string; lat?: number; lng?: number; loadStatus?: 'Loaded' | 'Empty'; photos?: string[]; problemType?: string; problemDetail?: string }) {
       const u = me();
       const clientCode = u.realm === 'CLIENT_PORTAL' ? u.clientCode! : f.clientCode!;
       await delay(250);
       const gate = creditGate(clientOf(clientCode), 'RESCUE_REQUEST');
       const c = mustClient(clientCode);
       const ch = db.chassis.find((x) => x.chassisNo === f.chassisNo);
+      if (u.realm === 'CLIENT_PORTAL') {
+        // Portal Rescue review (BR-01): a client on hold (or without rescue service) is told why and who to call — no request is created.
+        if (!gate.allowed) throw new ApiError(gate.code ?? 'CREDIT_GATE_BLOCKED', gate.reason ?? 'Rescue requests are blocked for your account.', 409);
+        if (!ch || ch.currentClientCode !== clientCode || !['On Hire', 'Rescue'].includes(ch.status)) throw new ApiError('VALIDATION_FAILED', 'Choose one of your units on hire.', 422, { chassisNo: 'Not on hire to your account' });
+        const fields: Record<string, string> = {};
+        if (!RESCUE_PROBLEM_TYPES.some((t) => t.value === f.problemType)) fields.problemType = 'Required';
+        if (f.problemType === RESCUE_PROBLEM_OTHER && !f.problemDetail?.trim()) fields.problemDetail = 'Describe the problem';
+        if (!f.loadStatus) fields.loadStatus = 'Required';
+        if (!f.locationText?.trim()) fields.locationText = 'Required';
+        if (!f.incident?.trim()) fields.incident = 'Required';
+        if (!f.sceneContactName?.trim()) fields.sceneContactName = 'Required';
+        if (!/^(\+63|0)\s?\(?\d{1,3}\)?[\s-]?\d{3,4}[\s-]?\d{4}$/.test(f.sceneContactPhone?.trim() ?? '')) fields.sceneContactPhone = 'Enter a PH number, e.g. 0917 123 4567';
+        if ((f.photos?.length ?? 0) > 5) fields.photos = 'Up to 5 photos';
+        if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
+      }
       const r: RescueRequest = { rescueNo: nextNo('RSC', 'RSC-', 6), clientCode, chassisNo: f.chassisNo, locationText: f.locationText, lat: f.lat, lng: f.lng, incident: f.incident, sceneContactName: f.sceneContactName, sceneContactPhone: f.sceneContactPhone,
-        urgent: f.urgent, status: gate.allowed ? 'Requested' : 'Blocked', blockedReason: gate.allowed ? undefined : gate.reason, requestedAt: nowIso(), requestedVia: u.realm === 'CLIENT_PORTAL' ? 'Portal' : 'Internal', branchCode: ch?.branchCode ?? c.branchCode, chargeable: true, loadStatus: f.loadStatus, photos: f.photos?.length ? f.photos : undefined, problemType: f.problemType || undefined };
+        urgent: f.urgent, status: gate.allowed ? 'Requested' : 'Blocked', blockedReason: gate.allowed ? undefined : gate.reason, requestedAt: nowIso(), requestedVia: u.realm === 'CLIENT_PORTAL' ? 'Portal' : 'Internal', branchCode: ch?.branchCode ?? c.branchCode, chargeable: true, loadStatus: f.loadStatus, photos: f.photos?.length ? f.photos : undefined, problemType: f.problemType || undefined,
+        problemDetail: f.problemType === RESCUE_PROBLEM_OTHER ? f.problemDetail?.trim() || undefined : undefined };
+      logRescue(r);
+      if (gate.allowed) r.notified = rescueNotified(r, c);
       db.rescues.unshift(r);
+      if (gate.allowed && u.realm === 'CLIENT_PORTAL') notify('rescue.requested.portal', `Rescue ${r.rescueNo} received`, `${r.chassisNo}${r.urgent ? ' · urgent' : ''} · the dispatcher will call ${r.sceneContactName} to confirm the crew and ETA.`, { extraUsers: [u.userId], link: `/client/rescue?open=${r.rescueNo}` });
       if (gate.allowed) notify('rescue.requested', `${f.urgent ? 'URGENT ' : ''}Rescue ${r.rescueNo}: ${c.clientName}`, `${f.chassisNo} · ${f.locationText} · ${f.incident}`, { branchCode: r.branchCode, link: `/rescue/${r.rescueNo}` });
       audit('rescue.requested', 'rescue', r.rescueNo, r); persist();
       return structuredClone(r);
@@ -1907,7 +1979,7 @@ export const api = {
         const r = db.rescues.find((x) => x.rescueNo === no); if (!r) throw new ApiError('NOT_FOUND', 'Rescue not found', 404);
         const from: Record<string, RescueRequest['status'][]> = { verify: ['Requested'], 'not-eligible': ['Requested', 'Verified'], confirm: ['Verified'], dispatch: ['Confirmed'], start: ['Dispatched'], cancel: ['Requested', 'Verified', 'Confirmed', 'Dispatched', 'In Progress'] };
         if (!from[action].includes(r.status)) throw new ApiError('INVALID_STATE', `Cannot ${action} a rescue in ${r.status}.`, 409);
-        if (action === 'verify') { const g = creditGate(clientOf(r.clientCode), 'RESCUE_DISPATCH'); if (!g.allowed) { r.status = 'Blocked'; r.blockedReason = g.reason; r.blockedAt = nowIso(); r.notEligibleBy = me().userId; audit('rescue.blocked', 'rescue', no, undefined, g.reason); persist(); return r; } r.status = 'Verified'; r.verifiedBy = me().userId; }
+        if (action === 'verify') { const g = creditGate(clientOf(r.clientCode), 'RESCUE_DISPATCH'); if (!g.allowed) { r.status = 'Blocked'; r.blockedReason = g.reason; r.blockedAt = nowIso(); r.notEligibleBy = me().userId; logRescue(r); audit('rescue.blocked', 'rescue', no, undefined, g.reason); persist(); return r; } r.status = 'Verified'; r.verifiedBy = me().userId; }
         if (action === 'not-eligible') { if (!data.reason?.trim()) throw new ApiError('VALIDATION_FAILED', 'Give the reason the client is not eligible.', 422, { reason: 'Required' }); r.status = 'Blocked'; r.blockedReason = `Not eligible (C&C): ${data.reason}`; r.blockedAt = nowIso(); r.notEligibleBy = me().userId; }
         if (action === 'confirm') { r.status = 'Confirmed'; r.confirmedBy = me().userId; }
         if (action === 'dispatch') {
@@ -1924,6 +1996,7 @@ export const api = {
           Object.assign(r, { status: 'Cancelled', cancelReason: data.reason, cancelledBy: me().userId, cancelledAt: nowIso() });
           const ch = db.chassis.find((x) => x.chassisNo === r.chassisNo); if (ch && ch.status === 'Rescue') { ch.status = 'On Hire'; ch.statusSince = nowIso(); }
         }
+        logRescue(r);
         audit(`rescue.${action}`, 'rescue', no, { status: r.status }, data.reason);
         persist();
         return r;
@@ -1951,6 +2024,7 @@ export const api = {
       const charge = computeRescueCharge({ oneWayKm: cost.oneWayKm, ratePerKm: rate, tireCost: cost.tireCost, partsCost: cost.partsCost, serviceChargePct: Number(S()['res.service_charge_pct'] ?? 0.1), vatPct: Number(S()['fin.vat_pct'] ?? 0.12) });
       Object.assign(r, { status: 'Completed', completedAt: nowIso(), completedBy: me().userId, oneWayKm: cost.oneWayKm, ratePerKm: rate, tireCost: cost.tireCost, partsCost: cost.partsCost, chargeable: cost.chargeable, total: charge.total, acknowledgedAt: nowIso(),
         costLines: cost.costLines, onsiteAssessment: cost.onsiteAssessment, beforePhotos: cost.beforePhotos, afterPhotos: cost.afterPhotos, clientAckName: cost.clientAckName });
+      logRescue(r);
       const ch = db.chassis.find((x) => x.chassisNo === r.chassisNo); if (ch && ch.status === 'Rescue') { ch.status = 'On Hire'; ch.statusSince = nowIso(); }
       notify('rescue.completed', `Rescue completed: ${no}`, `${clientName(r.clientCode)} · total ₱${charge.total.toLocaleString('en-PH')}`, { clientCode: r.clientCode, branchCode: r.branchCode });
       audit('rescue.completed', 'rescue', no, { ...charge }); persist();
@@ -2344,7 +2418,18 @@ export const api = {
       return tx(() => db.invoices.filter((i) => (u.realm === 'CLIENT_PORTAL' ? i.clientCode === u.clientCode && i.status !== 'Draft' : true))
         .map((i) => {
           const payment = paymentStatus(i), dOver = daysOverdue(i);
+          // Portal invoice review: receipts applied to this invoice (Official / Provisional), credit memos, proof of payment and disputes.
+          const payments = db.receipts.filter((r) => r.applications.some((a) => a.invoiceNo === i.invoiceNo)).map((r) => {
+            const official = r.status === 'OR Issued' || r.type === 'OR';
+            return { receiptNo: (official && r.orNo) || r.receiptNo, fromPr: official && r.orNo && r.orNo !== r.receiptNo ? r.receiptNo : undefined, series: official ? 'Official receipt' as const : 'Provisional receipt' as const,
+              status: r.status ?? 'OR Issued', date: r.date, amount: r.applications.find((a) => a.invoiceNo === i.invoiceNo)!.amount, method: r.method, bank: r.bank, checkNo: r.checkNo, reference: r.reference,
+              counted: !['Provisional', 'Bounced', 'Cancelled'].includes(r.status ?? 'OR Issued') };
+          });
+          const credits = db.memos.filter((m) => m.type === 'Credit' && m.status === 'Applied' && (m.appliedTo === i.invoiceNo || m.referenceInvoiceNo === i.invoiceNo)).map((m) => ({ memoNo: m.memoNo, amount: m.amount, reason: m.reason, category: m.category, appliedAt: m.appliedAt }));
+          const leaseLike = i.lines.some((l) => l.lineType === 'Lease');
           return { ...i, clientName: clientName(i.clientCode), payment, balance: balance(i), daysOverdue: dOver, invoiceDate: invoiceDateOf(i), creditTermDays: creditTermOf(i), branchName: db.branches.find((b) => b.code === i.branchCode)?.name ?? i.branchCode,
+            payments, credits, isLease: leaseLike,
+            advices: (db.paymentAdvices ?? []).filter((a) => a.invoiceNo === i.invoiceNo), disputes: (db.invoiceDisputes ?? []).filter((d) => d.invoiceNo === i.invoiceNo),
             daysToHold: payment === 'Overdue' ? holdDays - dOver : undefined, hasHeld: i.lines.some((l) => l.held), pendingClearance: pendingClearanceOf(i.invoiceNo) };
         })
         .filter((i) => (!f.client || i.clientCode === f.client)
@@ -2934,9 +3019,51 @@ export const api = {
       persist(); return { posted: false, workflowId: wf.id };
     },
     async topups() { requirePerm('ewl.ledger'); return tx(() => db.topups.map((t) => ({ ...t, clientName: clientName(t.clientCode) }))); },
-    async requestTopup(amount: number, proofFileName: string, paymentRef?: string) {
+    /**
+     * Portal top-up review: amount ₱500–₱5,000,000 (TOPUP_RULES) with centavos, transfer date, method and sending bank, reference (no duplicates),
+     * one proof file (PDF / JPG / PNG, max 5 MB), optional remarks; a rejected request can be resubmitted. Treasury and the AE are notified.
+     */
+    async requestTopup(f: { amount: number; transferDate: string; method: string; sendingBank?: string; reference: string; proofFileName: string; proofSizeMb?: number; remarks?: string; resubmitOf?: string }) {
       const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Portal only', 403);
-      return tx(() => { if (!(amount > 0)) throw new ApiError('VALIDATION_FAILED', 'Enter an amount.', 422); const t = { id: uid(), clientCode: u.clientCode!, amount, proofFileName, paymentRef: paymentRef?.trim() || undefined, status: 'Submitted' as const, submittedAt: nowIso() }; db.topups.unshift(t); return t; });
+      await delay();
+      return tx(() => {
+        const fields: Record<string, string> = {};
+        const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+        if (!(f.amount > 0)) fields.amount = 'Enter the amount you paid';
+        else if (Math.round(f.amount * 100) !== Math.round(f.amount * 100 * 1000) / 1000) fields.amount = 'Up to 2 decimals (centavos)';
+        else if (f.amount < TOPUP_RULES.min) fields.amount = `At least ₱${TOPUP_RULES.min.toLocaleString('en-PH')}`;
+        else if (f.amount > TOPUP_RULES.max) fields.amount = `At most ₱${TOPUP_RULES.max.toLocaleString('en-PH')} per request`;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f.transferDate ?? '')) fields.transferDate = 'Required';
+        else if (f.transferDate > today) fields.transferDate = 'Cannot be in the future';
+        else if (f.transferDate < addDays(today, -TOPUP_RULES.maxAgeDays).slice(0, 10)) fields.transferDate = `Within the last ${TOPUP_RULES.maxAgeDays} days`;
+        if (!f.method?.trim()) fields.method = 'Required';
+        if (!f.reference?.trim()) fields.reference = 'Required';
+        if (!f.proofFileName) fields.proofFileName = 'Upload the bank slip or transfer confirmation';
+        else if (!/\.(pdf|jpe?g|png)$/i.test(f.proofFileName)) fields.proofFileName = 'PDF, JPG or PNG only';
+        else if ((f.proofSizeMb ?? 0) > TOPUP_RULES.maxFileMb) fields.proofFileName = `Max ${TOPUP_RULES.maxFileMb} MB`;
+        if ((f.remarks?.length ?? 0) > 200) fields.remarks = 'Max 200 characters';
+        if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
+        const ref = f.reference.trim();
+        if (db.topups.some((t) => t.clientCode === u.clientCode && (t.paymentRef ?? '').toUpperCase() === ref.toUpperCase() && t.status !== 'Rejected'))
+          throw new ApiError('DUPLICATE', `A top-up with reference ${ref} was already sent.`, 409, { reference: 'Already used on another request' });
+        if (f.resubmitOf && !db.topups.some((t) => t.id === f.resubmitOf && t.clientCode === u.clientCode && t.status === 'Rejected')) throw new ApiError('INVALID_STATE', 'Only a rejected request can be resubmitted.', 409);
+        const c = mustClient(u.clientCode!);
+        const t: TopupRequest = { id: nextNo('TU', 'TU-', 6), clientCode: u.clientCode!, amount: round2(f.amount), proofFileName: f.proofFileName, paymentRef: ref, status: 'Submitted', submittedAt: nowIso(),
+          transferDate: f.transferDate, method: f.method.trim(), sendingBank: f.sendingBank?.trim() || undefined, remarks: f.remarks?.trim() || undefined, resubmitOf: f.resubmitOf };
+        const at = nowIso();
+        const treasury = db.users.filter((x) => x.realm === 'INTERNAL' && x.status === 'Active' && x.roles.includes('TREASURY'));
+        const ae = db.users.find((x) => x.userId === c.aeAssigned);
+        t.notified = [
+          ...treasury.map((x) => ({ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${x.name} — Treasury (to confirm the funds)`, to: x.email, status: 'Sent' as const })),
+          ...(ae ? [{ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${ae.name} — Account Executive`, to: ae.email, status: 'Sent' as const }] : []),
+          { at, channel: 'Email' as const, audience: 'Client' as const, recipient: `${u.name} (confirmation)`, to: u.email, status: 'Sent' as const },
+        ];
+        db.topups.unshift(t);
+        notify('ewallet.topup', `Top-up ${t.id} to confirm: ${c.clientName}`, `₱${t.amount.toLocaleString('en-PH')} · ${t.method} · ref ${ref} · transferred ${t.transferDate}${t.resubmitOf ? ` · resubmission of ${t.resubmitOf}` : ''}`,
+          { clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: treasury.map((x) => x.userId), link: `/ewallet/${c.clientCode}` });
+        audit('ewallet.topup_requested', 'ewallet', c.clientCode, t);
+        return t;
+      });
     },
     // DBL-CLT-018: Submitted → Treasury confirmed (who/when, bank ref, PR/OR) → Posted by Accounting; Reject needs a reason.
     async processTopup(id: string, action: 'confirm' | 'post' | 'reject', bankRef?: string, x: { receiptNo?: string; reason?: string } = {}) {
@@ -3479,6 +3606,167 @@ export const api = {
         };
       });
     },
+    /**
+     * Portal EWA list review: the client may cancel its own EWA while it is Active and nothing has been released (proposed — who may cancel:
+     * the client before any release, Delbros at any time from the staff app). The branch and the Account Executive are told.
+     */
+    async cancelEwa(euNo: string, reason: string) {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      await delay();
+      expireEwas();
+      return tx(() => {
+        const e = db.ewas.find((x) => x.euNo === euNo && x.clientCode === u.clientCode);
+        if (!e) throw new ApiError('NOT_FOUND', 'EWA not found.', 404);
+        if (e.status === 'Partially Used') throw new ApiError('INVALID_STATE', `${euNo} has units already released — call the ${e.branchCode} branch to cancel the rest.`, 409);
+        if (e.status !== 'Active') throw new ApiError('INVALID_STATE', `${euNo} is ${e.status.toLowerCase()} and cannot be cancelled.`, 409);
+        if (!reason?.trim()) throw new ApiError('VALIDATION_FAILED', 'A cancellation reason is required.', 422, { reason: 'Required' });
+        Object.assign(e, { status: 'Cancelled' as const, cancelledAt: nowIso(), cancelledBy: u.userId, cancelReason: reason.trim() });
+        const c = mustClient(e.clientCode);
+        notify('ewa.cancelled', `EWA ${euNo} cancelled by the client`, `${c.clientName} · ${e.branchCode} · ${reason.trim()}`, { branchCode: e.branchCode, clientCode: e.clientCode, aeUserId: c.aeAssigned, extraUsers: [c.aeAssigned], link: '/gate/ewa' });
+        audit('ewa.cancelled', 'ewa', euNo, { status: 'Cancelled' }, reason.trim(), { status: 'Active' });
+        return e;
+      });
+    },
+    /**
+     * Portal invoice review (proposed — Delbros to confirm scope): the client tells Accounting it has paid an invoice and attaches the proof.
+     * The balance does not change until Accounting verifies the payment and Treasury clears it (a Provisional then Official receipt).
+     */
+    async submitPaymentAdvice(f: { invoiceNo: string; amount: number; paidOn: string; method: string; bank?: string; reference: string; proofFileName: string; proofSizeMb?: number; remarks?: string }) {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      await delay();
+      return tx(() => {
+        const i = db.invoices.find((x) => x.invoiceNo === f.invoiceNo && x.clientCode === u.clientCode && x.status !== 'Draft');
+        if (!i) throw new ApiError('NOT_FOUND', 'Invoice not found.', 404);
+        if (i.status === 'Cancelled' || balance(i) <= 0) throw new ApiError('INVALID_STATE', `${i.invoiceNo} has nothing left to pay.`, 409);
+        const fields: Record<string, string> = {};
+        const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+        if (!(f.amount > 0)) fields.amount = 'Enter the amount paid';
+        else if (Math.round(f.amount * 100) !== f.amount * 100) fields.amount = 'Up to 2 decimals';
+        else if (f.amount > balance(i) + 0.005) fields.amount = `More than the balance (${balance(i).toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })})`;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f.paidOn ?? '')) fields.paidOn = 'Required'; else if (f.paidOn > today) fields.paidOn = 'Cannot be in the future';
+        if (!f.method?.trim()) fields.method = 'Required';
+        if (!f.reference?.trim()) fields.reference = 'Required';
+        if (!f.proofFileName) fields.proofFileName = 'Attach the proof';
+        else if (!/\.(pdf|jpe?g|png)$/i.test(f.proofFileName)) fields.proofFileName = 'PDF, JPG or PNG only';
+        else if ((f.proofSizeMb ?? 0) > 5) fields.proofFileName = 'Max 5 MB';
+        if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
+        if ((db.paymentAdvices ?? []).some((a) => a.clientCode === u.clientCode && a.reference.trim().toUpperCase() === f.reference.trim().toUpperCase() && a.status !== 'Rejected'))
+          throw new ApiError('DUPLICATE', `Reference ${f.reference.trim()} was already sent — Accounting is checking it.`, 409, { reference: 'Already sent' });
+        const a = { id: nextNo('PA', 'PA-', 6), clientCode: u.clientCode!, invoiceNo: i.invoiceNo, amount: f.amount, paidOn: f.paidOn, method: f.method.trim(), bank: f.bank?.trim() || undefined, reference: f.reference.trim(),
+          proofFileName: f.proofFileName, remarks: f.remarks?.trim() || undefined, status: 'Submitted' as const, submittedAt: nowIso(), submittedBy: u.userId };
+        (db.paymentAdvices ??= []).unshift(a);
+        const c = mustClient(u.clientCode!);
+        notify('billing.payment_advice', `Proof of payment ${a.id}: ${c.clientName}`, `${i.invoiceNo} · ₱${f.amount.toLocaleString('en-PH')} · ${a.method} · ref ${a.reference}`,
+          { clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: db.users.filter((x) => x.realm === 'INTERNAL' && x.roles.some((r) => r === 'ACCOUNTING' || r === 'TREASURY')).map((x) => x.userId), link: '/billing/receipts' });
+        audit('portal.payment_advice', 'invoice', i.invoiceNo, a);
+        return a;
+      });
+    },
+    /** Portal invoice review (proposed): dispute an invoice — the Account Executive and Accounting review it; a correction comes as a credit memo. */
+    async disputeInvoice(f: { invoiceNo: string; reason: string; details: string; amountDisputed?: number; attachment?: string }) {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      await delay();
+      return tx(() => {
+        const i = db.invoices.find((x) => x.invoiceNo === f.invoiceNo && x.clientCode === u.clientCode && x.status !== 'Draft');
+        if (!i) throw new ApiError('NOT_FOUND', 'Invoice not found.', 404);
+        if (i.status === 'Cancelled') throw new ApiError('INVALID_STATE', `${i.invoiceNo} is cancelled.`, 409);
+        if ((db.invoiceDisputes ?? []).some((d) => d.invoiceNo === i.invoiceNo && (d.status === 'Submitted' || d.status === 'Under review'))) throw new ApiError('DUPLICATE', `${i.invoiceNo} already has an open dispute.`, 409);
+        const fields: Record<string, string> = {};
+        if (!f.reason?.trim()) fields.reason = 'Required';
+        if ((f.details?.trim().length ?? 0) < 10) fields.details = 'Tell us what is wrong (at least 10 characters)';
+        if (f.amountDisputed != null && (f.amountDisputed <= 0 || f.amountDisputed > i.total)) fields.amountDisputed = 'Between ₱0 and the invoice total';
+        if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
+        const d = { id: nextNo('DSP', 'DSP-', 6), clientCode: u.clientCode!, invoiceNo: i.invoiceNo, reason: f.reason.trim(), details: f.details.trim(), amountDisputed: f.amountDisputed || undefined, attachment: f.attachment || undefined,
+          status: 'Submitted' as const, submittedAt: nowIso(), submittedBy: u.userId };
+        (db.invoiceDisputes ??= []).unshift(d);
+        const c = mustClient(u.clientCode!);
+        notify('billing.dispute', `Invoice dispute ${d.id}: ${c.clientName}`, `${i.invoiceNo} · ${d.reason}${d.amountDisputed ? ` · ₱${d.amountDisputed.toLocaleString('en-PH')}` : ''}`,
+          { clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: [c.aeAssigned, ...db.users.filter((x) => x.realm === 'INTERNAL' && x.roles.includes('ACCOUNTING')).map((x) => x.userId)], link: '/billing/invoices' });
+        audit('portal.invoice_dispute', 'invoice', i.invoiceNo, d);
+        return d;
+      });
+    },
+    /**
+     * Portal Contracts review: every contract of the client (Active, Expired, Terminated, Renewed) with what the client needs on one view —
+     * entitlement for every type, lock-in end and pre-termination fee (BR-15), rate history and the rate card (BR-18), minimum billing days,
+     * renewal notices, branches covered against actual activity, and the renewal / amendment / termination requests with their status.
+     */
+    async contracts() {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      expireContracts();
+      return tx(() => {
+        const c = mustClient(u.clientCode!);
+        const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+        const cap = Number(S()['clt.pretermination_cap_days'] ?? 30);
+        const covered = Array.from(new Set(c.cwsBranchAccess));
+        const branchName = (b: string) => db.branches.find((x) => x.code === b)?.name ?? b;
+        return db.contracts.filter((k) => k.clientCode === c.clientCode).sort((a, b) => (a.status === 'Active' ? -1 : 0) - (b.status === 'Active' ? -1 : 0) || b.effectiveDate.localeCompare(a.effectiveDate)).map((k) => {
+          const onHire = db.chassis.filter((x) => x.currentContractNo === k.contractNo && ['On Hire', 'Rescue'].includes(x.status))
+            .map((x) => ({ chassisNo: x.chassisNo, chassisType: x.chassisType, branchCode: db.gatePasses.find((g) => g.gatePassNo === x.currentGatePassNo)?.branchCode ?? x.branchCode, dailyRate: k.rates.find((r) => r.equipmentType === x.chassisType)?.dailyRate ?? 0 }));
+          const ent = k.status === 'Active' ? ewaEntitlement(k) : undefined;
+          const dailyTotal = round2(onHire.reduce((a, x) => a + x.dailyRate, 0));
+          const pt = preTerminationFee({ effectiveDate: k.effectiveDate, lockInMonths: k.lockInMonths, asOf: today, dailyTotal, capDays: cap });
+          // Branch activity under this contract: releases (Gate Out) and EWAs, by branch — all should be inside the covered branches.
+          const outs = db.gatePasses.filter((g) => g.contractNo === k.contractNo && g.direction === 'OUT');
+          const ewas = db.ewas.filter((e) => e.contractNo === k.contractNo);
+          const activity = Array.from(new Set([...outs.map((g) => g.branchCode), ...ewas.map((e) => e.branchCode)])).sort().map((b) => ({
+            code: b, name: branchName(b), releases: outs.filter((g) => g.branchCode === b).length, ewas: ewas.filter((e) => e.branchCode === b).length, onHire: onHire.filter((x) => x.branchCode === b).length, covered: covered.includes(b) }));
+          const rc = (eq: string) => (db.rateCards ?? []).find((r) => r.equipmentType === eq && r.contractType === k.contractType && r.validFrom <= today && (!r.validTo || r.validTo >= today));
+          return {
+            ...k,
+            lockInEnd: pt.lockInEnd, preTermination: { ...pt, capDays: cap, dailyTotal, unitsOnHire: onHire.length },
+            minBillingDays: k.minBillingDays ?? MIN_BILLING_DAYS[k.contractType],
+            renewalNotices: k.expiryDate && k.status === 'Active' ? renewalNoticeDates(k.expiryDate).map((n) => ({ ...n, sent: n.date <= today })) : [],
+            entitlement: k.rates.map((r) => {
+              const t = ent?.types.find((x) => x.equipmentType === r.equipmentType);
+              return { equipmentType: r.equipmentType, dailyRate: r.dailyRate, rateCard: rc(r.equipmentType)?.dailyRate, entitled: k.entitlementByType || r.qty ? (r.qty ?? 0) : undefined,
+                onHire: onHire.filter((x) => x.chassisType === r.equipmentType).length, pending: t?.pending ?? 0, remaining: t?.remaining };
+            }),
+            entitlementTotals: ent ? { unitQty: ent.unitQty, onHire: ent.onHire, pending: ent.pending, remaining: ent.contractRemaining } : undefined,
+            onHireUnits: onHire,
+            branches: { covered: covered.map((b) => ({ code: b, name: branchName(b) })), activity, outside: activity.filter((a) => !a.covered).map((a) => a.code) },
+            requests: (db.contractRequests ?? []).filter((r) => r.contractNo === k.contractNo).map((r) => ({ ...r, decidedByName: db.users.find((x) => x.userId === r.decidedBy)?.name ?? r.decidedBy })),
+            bondHeld: db.cashBonds.filter((b) => b.contractNo === k.contractNo && (b.status === 'Held' || b.status === 'Withdrawal Pending')).reduce((a, b) => a + b.amount, 0),
+            ewalletMinimum: db.ewallets.find((w) => w.clientCode === c.clientCode)?.minimumBalance,
+          };
+        });
+      });
+    },
+    /** Portal Contracts review: request a renewal, amendment or termination; the Account Executive and Sales Director review it. */
+    async requestContractChange(f: { contractNo: string; kind: 'Renewal' | 'Amendment' | 'Termination'; details: string; termMonths?: number; changeArea?: string; effectiveDate?: string }) {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      await delay();
+      return tx(() => {
+        const c = mustClient(u.clientCode!);
+        const k = db.contracts.find((x) => x.contractNo === f.contractNo && x.clientCode === c.clientCode);
+        if (!k) throw new ApiError('NOT_FOUND', 'Contract not found.', 404);
+        if (k.status !== 'Active') throw new ApiError('INVALID_STATE', `${k.contractNo} is ${k.status.toLowerCase()} — only an active contract can be renewed, amended or terminated.`, 409);
+        if ((db.contractRequests ?? []).some((r) => r.contractNo === k.contractNo && r.kind === f.kind && (r.status === 'Submitted' || r.status === 'Under review')))
+          throw new ApiError('DUPLICATE', `A ${f.kind.toLowerCase()} request for ${k.contractNo} is already open.`, 409);
+        const fields: Record<string, string> = {};
+        const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+        if ((f.details?.trim().length ?? 0) < 10) fields.details = 'Tell us what you need (at least 10 characters)';
+        if (f.kind === 'Renewal' && !(Number.isInteger(f.termMonths) && f.termMonths! >= 1 && f.termMonths! <= 60)) fields.termMonths = 'Whole months, 1 to 60';
+        if (f.kind === 'Amendment' && !f.changeArea) fields.changeArea = 'Required';
+        if (f.kind === 'Termination') {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(f.effectiveDate ?? '')) fields.effectiveDate = 'Required';
+          else if (f.effectiveDate! < today) fields.effectiveDate = 'Today or later';
+        }
+        if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
+        let feeEstimate: number | undefined;
+        if (f.kind === 'Termination') {
+          const daily = db.chassis.filter((x) => x.currentContractNo === k.contractNo && ['On Hire', 'Rescue'].includes(x.status)).reduce((a, x) => a + (k.rates.find((r) => r.equipmentType === x.chassisType)?.dailyRate ?? 0), 0);
+          feeEstimate = preTerminationFee({ effectiveDate: k.effectiveDate, lockInMonths: k.lockInMonths, asOf: f.effectiveDate!, dailyTotal: daily, capDays: Number(S()['clt.pretermination_cap_days'] ?? 30) }).fee;
+        }
+        const r = { id: nextNo('CRQ', 'CRQ-', 6), clientCode: c.clientCode, contractNo: k.contractNo, kind: f.kind, details: f.details.trim(), termMonths: f.kind === 'Renewal' ? f.termMonths : undefined,
+          changeArea: f.kind === 'Amendment' ? f.changeArea : undefined, effectiveDate: f.kind === 'Termination' ? f.effectiveDate : undefined, feeEstimate, status: 'Submitted' as const, submittedAt: nowIso(), submittedBy: u.userId };
+        (db.contractRequests ??= []).unshift(r);
+        notify('contract.request', `Contract ${f.kind.toLowerCase()} request ${r.id}: ${c.clientName}`, `${k.contractNo} · ${r.details}`,
+          { clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: [c.aeAssigned, ...db.users.filter((x) => x.realm === 'INTERNAL' && x.roles.includes('SALES_DIRECTOR')).map((x) => x.userId)], link: '/contracts' });
+        audit('portal.contract_request', 'contract', k.contractNo, r);
+        return r;
+      });
+    },
     /** Dashboard review: the client's notifications, each with a link to the record in the portal. */
     async notifications() {
       const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
@@ -3497,6 +3785,7 @@ export const api = {
         if (r.status !== 'Requested') throw new ApiError('INVALID_STATE', `${no} is already ${r.status.toLowerCase()} — call the dispatcher to cancel.`, 409);
         if (!reason.trim()) throw new ApiError('VALIDATION_FAILED', 'A cancellation reason is required.', 422, { reason: 'Required' });
         Object.assign(r, { status: 'Cancelled', cancelReason: reason.trim(), cancelledBy: u.userId, cancelledAt: nowIso() });
+        logRescue(r);
         notify('rescue.cancelled', `Rescue ${no} cancelled by the client`, `${clientName(r.clientCode)} · ${r.chassisNo} · ${reason.trim()}`, { branchCode: r.branchCode, clientCode: r.clientCode, link: `/rescue/${no}` });
         audit('rescue.cancel', 'rescue', no, { status: 'Cancelled' }, reason, { status: 'Requested' }); persist();
         return structuredClone(r);

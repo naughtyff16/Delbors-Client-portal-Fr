@@ -60,3 +60,27 @@ export function daysToExpiry(expiryDate?: string, today = new Date()): number | 
   if (!expiryDate) return undefined;
   return Math.ceil((new Date(expiryDate + 'T23:59:59').getTime() - today.getTime()) / 86_400_000);
 }
+
+// ── Portal Contracts review (2026-11-11) ───────────────────────────────────
+/** Minimum billing days per contract type when the contract does not set its own (proposed — Finance to confirm; QLP follows BR-12's 10-day minimum). */
+export const MIN_BILLING_DAYS: Record<ContractType, number> = { LTL: 1, SPL: 1, QLP: 10 };
+/** Calendar-month add on a YYYY-MM-DD date (end of month clamps: 31-Jan + 1 month = 28/29-Feb). */
+export function addMonthsYmd(ymd: string, months: number) {
+  const [y, m, d] = ymd.slice(0, 10).split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + months, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+const dayIdx = (ymd: string) => Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)) / 86_400_000;
+/**
+ * BR-15 pre-termination fee (proposed formula — Finance / Legal to confirm): if the contract ends inside its lock-in, the client pays the
+ * daily rates of the units on hire for the lock-in days left, capped at `capDays`. Outside the lock-in there is no fee.
+ */
+export function preTerminationFee(p: { effectiveDate: string; lockInMonths: number; asOf: string; dailyTotal: number; capDays: number }) {
+  const lockInEnd = p.lockInMonths > 0 ? addMonthsYmd(p.effectiveDate, p.lockInMonths) : undefined;
+  const remainingDays = lockInEnd ? Math.max(0, dayIdx(lockInEnd) - dayIdx(p.asOf)) : 0;
+  const chargeableDays = Math.min(remainingDays, p.capDays);
+  return { lockInEnd, inLockIn: remainingDays > 0, remainingDays, chargeableDays, fee: Math.round(p.dailyTotal * chargeableDays * 100) / 100 };
+}
+/** DBL-CLT-011 renewal notices: 3, 2 and 1 month before the end date. */
+export const renewalNoticeDates = (expiry: string) => [3, 2, 1].map((m) => ({ monthsBefore: m, date: addMonthsYmd(expiry, -m) }));
