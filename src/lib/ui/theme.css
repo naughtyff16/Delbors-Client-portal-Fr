@@ -1,0 +1,97 @@
+/* Delbros Leasing — LIGHT THEME ONLY (ADR-009, docs/03-design-system.md).
+   Tokens are Tailwind v4 @theme variables; there are intentionally no dark variants. */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* IDs and codes ("font-mono") use Inter too — no Consolas / system monospace. Tabular digits keep ID columns aligned (see .font-mono below). */
+  --font-mono: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Brand — sampled from Assets/delbros-logo-white 1.png (#0058A8) */
+  --color-brand-50: #eef5fc;
+  --color-brand-100: #d6e7f7;
+  --color-brand-200: #adcfee;
+  --color-brand-300: #7aaedf;
+  --color-brand-400: #3878b8;
+  --color-brand-500: #0b66b8;
+  --color-brand-600: #0058a8;
+  --color-brand-700: #004a8f;
+  --color-brand-800: #1f3a68;
+  --color-brand-900: #152a4d;
+
+  /* Surfaces & text */
+  --color-canvas: #f6f8fb;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f1f4f8;
+  --color-line: #e3e8ef;
+  --color-line-strong: #cbd5e1;
+  --color-ink: #0f172a;
+  --color-ink-2: #334155;
+  --color-muted: #64748b;
+  --color-disabled: #94a3b8;
+
+  /* Semantic */
+  --color-success: #15803d;
+  --color-success-bg: #ecfdf3;
+  --color-success-line: #abefc6;
+  --color-warning: #b45309;
+  --color-warning-bg: #fffaeb;
+  --color-warning-line: #fedf89;
+  --color-danger: #b42318;
+  --color-danger-bg: #fef3f2;
+  --color-danger-line: #fecdca;
+  --color-info: #0058a8;
+  --color-info-bg: #eef5fc;
+  --color-info-line: #adcfee;
+  --color-neutral: #475467;
+  --color-neutral-bg: #f2f4f7;
+  --color-neutral-line: #e4e7ec;
+  --color-purple: #6941c6;
+  --color-purple-bg: #f4f3ff;
+  --color-purple-line: #d9d6fe;
+
+  --radius-card: 0.75rem;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.07);
+}
+
+@layer base {
+  :root { color-scheme: light; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 2px; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .font-mono, code, kbd, samp, pre { font-variant-numeric: tabular-nums; }
+  /* Sideways scrollers never grow a vertical scrollbar from a 1px overhang (no stray ▲▼ arrows). */
+  .overflow-x-auto { overflow-y: hidden; }
+  /* Thin, quiet scrollbars wherever real scrolling remains (tables, drawers, menus). */
+  * { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  /* Dropdowns: replace the native arrow (flush to the edge) with an evenly inset chevron. */
+  select:not([multiple]):not([size]) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.625rem center;
+    background-size: 1rem 1rem;
+    padding-right: 2.25rem !important;
+    text-overflow: ellipsis;
+  }
+  select:not([multiple]):not([size]):disabled { opacity: 1; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2394a3b8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E"); }
+  select::-ms-expand { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  @media print {
+    body { background: #fff; }
+    .no-print { display: none !important; }
+  }
+}

@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light only">
+<title>Portal Review 1.1 Audit</title>
+<style>
+:root{--bg:#f6f7fb;--surface:#fff;--alt:#f1f4f9;--line:#e3e7ef;--ink:#152033;--ink2:#3b4658;--muted:#6b7587;--brand:#0b5cad;--brand-bg:#e9f2fc;
+--ok:#16794a;--ok-bg:#e7f6ee;--built:#0b5cad;--built-bg:#e9f2fc;--data:#6d3fc0;--data-bg:#f1ebfc;--open:#a35a00;--open-bg:#fff4e2;--ans:#3b4658;--ans-bg:#eef0f4;--bad:#b42318;--bad-bg:#fdecea;
+color-scheme:light only} /* light theme only, also when the OS / browser is in dark mode */
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Segoe UI",Inter,system-ui,-apple-system,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:32px 16px 64px}
+header.top{border-bottom:3px solid var(--brand);padding-bottom:18px;margin-bottom:24px}
+h1{font-size:28px;margin:0 0 6px}h2{font-size:21px;margin:40px 0 10px;padding-top:8px;border-top:1px solid var(--line)}h3{font-size:16px;margin:22px 0 8px}
+p{margin:6px 0 10px}.muted{color:var(--muted)}small{color:var(--muted)}
+code{background:var(--alt);padding:1px 5px;border-radius:4px;font-size:13px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0}
+nav.toc a{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 12px;color:var(--ink2);text-decoration:none;font-size:13px}
+nav.toc a:hover{border-color:var(--brand);color:var(--brand)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi b{display:block;font-size:26px}.kpi span{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}
+.tbl{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14px}
+.tbl th{background:var(--alt);text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:9px 10px}
+.tbl td{border-top:1px solid var(--line);padding:9px 10px;vertical-align:top}
+.tbl td:first-child{width:27%;font-weight:600}.tbl td:nth-child(2){width:118px}
+.scroll{overflow-x:auto}
+.st{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.FIXED{color:var(--ok);background:var(--ok-bg)}.BUILT{color:var(--built);background:var(--built-bg)}.DATA{color:var(--data);background:var(--data-bg)}.OPEN{color:var(--open);background:var(--open-bg)}.ANSWER{color:var(--ans);background:var(--ans-bg)}.NEW{color:var(--bad);background:var(--bad-bg)}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:12px 0}
+.shots.one{grid-template-columns:1fr}
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
+figure img{width:100%;height:auto;display:block;border-radius:6px;border:1px solid var(--line);max-height:620px;object-fit:cover;object-position:top}
+figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+figcaption b{color:var(--ink2)}
+ol.steps li,ul.list li{margin:5px 0}
+.note{border-left:4px solid var(--open);background:var(--open-bg);padding:10px 14px;border-radius:6px;margin:12px 0}
+.ok{border-left:4px solid var(--ok);background:var(--ok-bg);padding:10px 14px;border-radius:6px;margin:12px 0}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--muted)}
+@media (max-width:760px){.shots{grid-template-columns:1fr}.tbl td:first-child{width:auto}h1{font-size:23px}}
+@media print{figure img{max-height:none}nav.toc{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="muted" style="margin:0">Delbros Leasing · Client &amp; vendor portal (frontend-portal v0.1.0)</p>
+  <h1>Audit of “Client portal dashboard — Review 1.1”</h1>
+  <p>What was checked, what was fixed, how to verify each item, and what still needs a business decision. Prepared 02-Nov-2026. Screens covered: Dashboard, New EWA, EWA list, Roadside rescue, Invoices &amp; statement, E-wallet &amp; cash bond, Contracts, Vendor portal.</p>
+  <div class="legend">
+    <span><span class="st FIXED">Fixed</span> changed in this pass</span>
+    <span><span class="st BUILT">Already built</span> existed but was not in the reviewed screenshots (proof below)</span>
+    <span><span class="st DATA">Data fixed</span> sample data corrected</span>
+    <span><span class="st ANSWER">Answered</span> explained, no change needed</span>
+    <span><span class="st OPEN">Open</span> needs a business decision</span>
+    <span><span class="st NEW">New finding</span> found during this audit</span>
+  </div>
+</header>
+
+<div class="kpis">
+  <div class="kpi"><span>Review items traced</span><b>93</b></div>
+  <div class="kpi"><span>Fixed</span><b style="color:var(--ok)">48</b></div>
+  <div class="kpi"><span>Already built</span><b style="color:var(--built)">16</b></div>
+  <div class="kpi"><span>Data fixed</span><b style="color:var(--data)">10</b></div>
+  <div class="kpi"><span>Answered</span><b>7</b></div>
+  <div class="kpi"><span>Items with an open part</span><b style="color:var(--open)">29</b></div>
+  <div class="kpi"><span>New findings</span><b style="color:var(--bad)">5</b></div>
+</div>
+<p class="muted" style="margin-top:-6px">Status counts are tags. An item can carry two (e.g. “Fixed / Open” when the screen is done but the rule still needs sign-off). The 29 open parts reduce to the 25 decisions listed at the end.</p>
+
+<div class="ok"><b>Build status:</b> TypeScript typecheck clean · 36/36 unit tests pass · production build passes with the no-CDN check · 31 screens captured in Chrome with no page errors. Before screenshots were taken from the code before any change, and after screenshots from the fixed code.</div>
+
+<nav class="toc">
+  <a href="#verify">How to verify</a><a href="#dash">Dashboard</a><a href="#newewa">New EWA</a><a href="#ewalist">EWA list</a><a href="#rescue">Rescue</a><a href="#inv">Invoices &amp; SOA</a><a href="#wallet">E-wallet &amp; bond</a><a href="#contracts">Contracts</a><a href="#vendor">Vendor</a><a href="#account">Account menu</a><a href="#new">New findings</a><a href="#open">Open decisions</a><a href="#files">Files changed</a>
+</nav>
+
+<div class="note"><b>Read first: one figure changed on purpose.</b> The reviewer reconciled the e-wallet at ₱12,000. That ₱18,000 deduction could not be produced by the BR-11 formula, and its rescue (RSC-000020) was missing from the rescue list. RSC-000020 now exists with a full breakdown that totals <b>₱18,048.80</b>, so the balance is now <b>₱30,000 − ₱18,048.80 = ₱11,951.20</b>. Due dates and contract dates also moved by one day; see the “Data fixed” rows under Invoices.</div>
+
+<!-- ───────────────────────── VERIFY ───────────────────────── -->
+<h2 id="verify">How to verify (step by step)</h2>
+<ol class="steps">
+  <li>In <code>frontend-portal</code>, run <code>npm run typecheck</code>, <code>npm test</code> and <code>npm run build</code>. All three must pass.</li>
+  <li>Run <code>npm run dev</code> and open the sign-in page. The mock DB is now version 13, so saved demo data reloads once on first load. If a browser still shows old data, sign out and reload.</li>
+  <li>Sign in as <code>client@abclogistics.ph</code> / <code>Demo@2026</code> (Active client). Work through the sections below and compare each screen with the <b>After</b> screenshot.</li>
+  <li>Sign in as <code>client@pacificmovers.ph</code> (ON HOLD) to check the blocked states: dashboard banner, disabled Create EWA / Request rescue, negative e-wallet.</li>
+  <li>Choose <b>Vendor / supplier</b> and sign in as <code>vendor@tirepro.ph</code> for the vendor portal.</li>
+  <li>Arithmetic to re-check: Unpaid ₱47,040 + ₱27,040 + ₱5,040 = <b>₱79,120</b>. Rescue RSC-000020: 2,000 + 12,650 = 14,650 → +10% = 16,115 → +12% VAT = <b>18,048.80</b>. Wallet: 30,000 − 18,048.80 = <b>11,951.20</b>. Amber threshold: 10,000 × 125% = <b>12,500</b>. Due date: invoice date + 30 days (e.g. 13-Oct → 12-Nov).</li>
+</ol>
+<p class="muted">Dates in the demo are relative to “today”, so the exact days you see will differ from these screenshots (taken 02-Nov-2026). The relationships between them stay the same.</p>
+
+<!-- ───────────────────────── DASHBOARD ───────────────────────── -->
+<h2 id="dash">1 · Client dashboard <small>(DBL-CLT-017, CLT-018, RPT-009, EWL-002…005, BR-01, BR-06)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>Equipment return history</td><td><span class="st FIXED">Fixed</span></td><td>New <b>Returned equipment</b> card: unit, branch, Gate In pass, hire date → return date. Sample: DW-MNL-1001 hired 19-Aug, returned 28-Sep.</td></tr>
+<tr><td>Cash bond withdrawal request</td><td><span class="st BUILT">Already built</span></td><td>On the E-wallet page (Cash bond card → Request withdrawal). Now easier to find: the menu reads <b>E-wallet &amp; bond</b>, and the dashboard wallet card links to the withdrawal.</td></tr>
+<tr><td>Feedback submission</td><td><span class="st FIXED">Fixed</span></td><td>User name → <b>Send feedback</b>: category, subject, message, optional reference. The Account Executive is notified and the client gets an FB- reference. See <a href="#account">Account menu</a>.</td></tr>
+<tr><td>Active lease contracts (count + nearest expiry)</td><td><span class="st FIXED">Fixed</span></td><td>New <b>Active contracts</b> tile: count, plus “Expires 11-May-2027” linking to Contracts. Turns amber within 30 days of expiry.</td></tr>
+<tr><td>Service ticket status</td><td><span class="st FIXED">Fixed</span></td><td>New <b>Open service requests</b> card: open rescues with status, urgent flag and dispatcher ETA. Repair job orders are not shown (see Open decisions).</td></tr>
+<tr><td>EWA history columns · Cancelled status</td><td><span class="st FIXED">Fixed</span></td><td>Truck and Created columns added; Cancelled pill shown (EU-000765). Licence, trucker, units and contract are on the EWA page and its detail view.</td></tr>
+<tr><td>E-wallet transactions: category, reference, running balance</td><td><span class="st FIXED">Fixed</span></td><td>Newest first. Each row: date · type · category, reference (e.g. “Rescue RSC-000020”), amount and balance after.</td></tr>
+<tr><td>Pending top-up state</td><td><span class="st BUILT">Already built</span></td><td>Top-up requests card on the E-wallet page (Submitted → Confirmed by Treasury → Posted / Rejected). It is now always shown, with an empty state.</td></tr>
+<tr><td>Orange threshold definition</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>The rule is now stated on screen: <b>amber below ₱12,500 (125% of the minimum), red below ₱0</b>. Finance still needs to confirm the 125%.</td></tr>
+<tr><td>Below-minimum notice to client (EWL-004)</td><td><span class="st BUILT">Already built</span></td><td>Warning banner with a top-up link when the balance is below the minimum (see Pacific Movers screenshot).</td></tr>
+<tr><td>Oldest due: amount, overdue state</td><td><span class="st FIXED">Fixed</span></td><td>Tile shows “₱47,040.00 · due in 10 days” and turns red when overdue (Pacific Movers: “₱201,600.00 · overdue 45 days”).</td></tr>
+<tr><td>Oldest due from client acknowledgment (DBL-CNC-005)</td><td><span class="st OPEN">Open</span></td><td>The due date is still invoice date + credit term. Measuring from acknowledgment of receipt is a billing rule for Finance / C&amp;C to confirm.</td></tr>
+<tr><td>Account Executive contact</td><td><span class="st FIXED">Fixed</span></td><td>Footer: “Your Account Executive: Jasmine Reyes · +63 917 000 0000 · email”. Phone and email are clickable.</td></tr>
+<tr><td>Held account state (Pacific Movers)</td><td><span class="st BUILT">Already built</span></td><td>Hold banner with overdue balance, red disabled Create EWA / Request rescue tiles, “View balance”. Screenshot below.</td></tr>
+<tr><td>Password change and profile</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Change password added (same rule as registration: 10+ characters, upper, lower, digit). Editing the profile and in-app notifications are open.</td></tr>
+<tr><td>EU-000770 status conflicts with the Audit log</td><td><span class="st DATA">Data fixed</span></td><td>The cancelled EWA in the Audit log is now its own record, <b>EU-000765</b> (Cancelled, reason “trucker unavailable”). EU-000770 is a plain expired EWA.</td></tr>
+<tr><td>EU numbers out of date order · same driver everywhere</td><td><span class="st DATA">Data fixed</span></td><td>Older EWAs are numbered by creation date (EU-000600 = oldest) and use 4 drivers. Lists are newest first.</td></tr>
+<tr><td>Wallet arithmetic (₱12,000)</td><td><span class="st DATA">Data fixed</span></td><td>Now ₱11,951.20; see the note at the top.</td></tr>
+<tr><td>Unit numbers and 6 per branch</td><td><span class="st ANSWER">Answered</span></td><td>Demo units are numbered across 10 branches in order: MNL 1001–1006, NVL 1007–1012, CAV 1013–1018 … so DW-CAV-1016 fits. Real numbers come from master data.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/before/dashboard.png" target="_blank"><img src="screenshots/before/dashboard.png" alt="Dashboard before" loading="lazy"></a><figcaption><b>Before</b> — 4 tiles, wallet ₱12,000, EWA rows 600/605/610 out of date order, generic footer.</figcaption></figure>
+  <figure><a href="screenshots/after/dashboard.png" target="_blank"><img src="screenshots/after/dashboard.png" alt="Dashboard after" loading="lazy"></a><figcaption><b>After</b> — Active contracts tile, oldest-due amount, amber rule, service requests, returned equipment, EU-000765 Cancelled, AE footer.</figcaption></figure>
+  <figure><a href="screenshots/after/dashboard-hold.png" target="_blank"><img src="screenshots/after/dashboard-hold.png" alt="Held account" loading="lazy"></a><figcaption><b>After · held account</b> (Pacific Movers) — hold banner, blocked actions, negative wallet, overdue oldest due.</figcaption></figure>
+  <figure><a href="screenshots/after/mobile-dashboard.png" target="_blank"><img src="screenshots/after/mobile-dashboard.png" alt="Dashboard on a phone" loading="lazy"></a><figcaption><b>After · phone width (390 px)</b> — every card stacks; no sideways scrolling.</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── NEW EWA ───────────────────────── -->
+<h2 id="newewa">2 · New EWA form <small>(DBL-GAT-001…003, BR-01, BR-06, Screen Inventory)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>Plate and licence format</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Type <code>12345</code> as the plate and <code>ABC</code> as the licence, then press Create EWA: you get “Use the LTO format, e.g. NAB 5678 / N01-23-456789”. The formats are proposed and need Operations to confirm.</td></tr>
+<tr><td>Quantity: whole number ≥ 1, not above availability</td><td><span class="st FIXED">Fixed</span></td><td>Quantity is checked against the units available at the chosen branch (shown in the equipment list as “— N available”). The API also refuses over-requests.</td></tr>
+<tr><td>Quantity not above the contract allowance</td><td><span class="st OPEN">Open</span></td><td>Needs the entitlement rule; see new finding N1.</td></tr>
+<tr><td>“Missing driver/truck info” error</td><td><span class="st FIXED">Fixed</span></td><td>Red banner under the form when the trucker, plate, driver or licence is blank.</td></tr>
+<tr><td>Equipment types by contract</td><td><span class="st FIXED">Fixed</span></td><td>The list holds only types on the selected contract’s rate card (“Select a contract first” until one is chosen).</td></tr>
+<tr><td>Confirmation screen (GAT-002)</td><td><span class="st FIXED">Fixed</span></td><td>After Create EWA: large EU number, valid until, all details, “Details emailed to … and sent to the branch and your Account Executive”, plus Print / PDF and Copy EU no.</td></tr>
+<tr><td>Blocked states: hold, Allow Online off, no branch</td><td><span class="st BUILT">Already built</span></td><td>The New EWA button is disabled and a red banner explains the reason from the credit gate (hold, or “Online EWA is not enabled for this client”). The branch list shows only the client’s CWS branches.</td></tr>
+<tr><td>More than one equipment type per EWA</td><td><span class="st OPEN">Open</span></td><td>The API already accepts several unit lines; the form offers one. Business to decide.</td></tr>
+<tr><td>Truck OR/CR in the portal</td><td><span class="st OPEN">Open</span> / <span class="st ANSWER">Answered</span></td><td>Today it is captured at the gate. It now shows on the EWA detail once the EWA is used.</td></tr>
+<tr><td>Saved drivers / trucks · pickup time · remarks</td><td><span class="st OPEN">Open</span></td><td>Not in the requirement; optional.</td></tr>
+<tr><td>Client-side extension</td><td><span class="st ANSWER">Answered</span> / <span class="st OPEN">Open</span></td><td>Current design: the client can only <i>request</i> an extension once the EWA has expired; a manager approves and IT revalidates (status “Extension pending”). Confirm this is acceptable.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/before/ewa-new-errors.png" target="_blank"><img src="screenshots/before/ewa-new-errors.png" alt="New EWA errors before" loading="lazy"></a><figcaption><b>Before</b> — “12345” and “ABC” accepted; only “Required” checks.</figcaption></figure>
+  <figure><a href="screenshots/after/ewa-new-errors.png" target="_blank"><img src="screenshots/after/ewa-new-errors.png" alt="New EWA errors after" loading="lazy"></a><figcaption><b>After</b> — format errors and the “Missing driver/truck info” banner.</figcaption></figure>
+  <figure><a href="screenshots/before/ewa-created.png" target="_blank"><img src="screenshots/before/ewa-created.png" alt="Created before" loading="lazy"></a><figcaption><b>Before</b> — only a toast after creation.</figcaption></figure>
+  <figure><a href="screenshots/after/ewa-created.png" target="_blank"><img src="screenshots/after/ewa-created.png" alt="Created after" loading="lazy"></a><figcaption><b>After</b> — confirmation with EU number, validity, details, recipients, Print / Copy.</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── EWA LIST ───────────────────────── -->
+<h2 id="ewalist">3 · EWA list <small>(DBL-GAT-001…003, BR-06, BR-16)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>Trucker, equipment type, contract</td><td><span class="st FIXED">Fixed</span></td><td>New “Equipment · released” column (e.g. “20ft chassis 0/1”). Trucker and contract are in the row detail.</td></tr>
+<tr><td>Cancelled status and tab</td><td><span class="st FIXED">Fixed</span></td><td>Tabs: All / Active / Used / Expired / Cancelled. The detail shows the cancellation time and reason.</td></tr>
+<tr><td>Extend flow</td><td><span class="st BUILT">Already built</span></td><td>Extend → reason → “Extension pending · Awaiting manager approval”, then IT revalidation (BR-06).</td></tr>
+<tr><td>Gate Pass number once Used · truck OR/CR</td><td><span class="st FIXED">Fixed</span></td><td>Detail → “Released at the gate”: GP no., unit, time, OR/CR.</td></tr>
+<tr><td>Detail view, print / share, created date</td><td><span class="st FIXED">Fixed</span></td><td>The detail existed (row click). Added: created date and channel (portal / Delbros), and Print / PDF with a one-page EWA document.</td></tr>
+<tr><td>Row order, pagination, branch filter</td><td><span class="st FIXED">Fixed</span></td><td>Newest first, 10 per page, branch filter. A date-range filter is still open.</td></tr>
+<tr><td>Blocked New EWA on hold</td><td><span class="st BUILT">Already built</span></td><td>Screenshot below (Pacific Movers).</td></tr>
+<tr><td>Released &lt; requested (e.g. 1/2)</td><td><span class="st OPEN">Open</span></td><td>The system has a “Partially Used” status; confirm whether unreleased units expire with the EWA.</td></tr>
+<tr><td>Time zone of valid-until times</td><td><span class="st ANSWER">Answered</span></td><td>All times are shown in Asia/Manila. Each EWA’s valid-until is exactly 24 h after creation; the minutes differ only because creation times differ.</td></tr>
+<tr><td>Shared plate / driver in sample rows · EU-000770</td><td><span class="st DATA">Data fixed</span></td><td>EU-000770 now uses NAB 5679 / Mario Reyes; older EWAs use 4 drivers.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/before/ewa-list.png" target="_blank"><img src="screenshots/before/ewa-list.png" alt="EWA list before" loading="lazy"></a><figcaption><b>Before</b> — rows out of date order, one driver, no Cancelled tab.</figcaption></figure>
+  <figure><a href="screenshots/after/ewa-list.png" target="_blank"><img src="screenshots/after/ewa-list.png" alt="EWA list after" loading="lazy"></a><figcaption><b>After</b> — newest first, Cancelled tab, branch filter, equipment column.</figcaption></figure>
+  <figure><a href="screenshots/after/ewa-detail-used.png" target="_blank"><img src="screenshots/after/ewa-detail-used.png" alt="Used EWA detail" loading="lazy"></a><figcaption><b>After</b> — used EWA with Gate Pass, unit, time and OR/CR; Print / PDF.</figcaption></figure>
+  <figure><a href="screenshots/after/ewa-detail-cancelled.png" target="_blank"><img src="screenshots/after/ewa-detail-cancelled.png" alt="Cancelled EWA detail" loading="lazy"></a><figcaption><b>After</b> — EU-000765 Cancelled, with the reason that matches the Audit log.</figcaption></figure>
+  <figure><a href="screenshots/after/ewa-extend.png" target="_blank"><img src="screenshots/after/ewa-extend.png" alt="Extension request" loading="lazy"></a><figcaption><b>Already built</b> — extension request (manager approval + revalidation).</figcaption></figure>
+  <figure><a href="screenshots/after/ewa-list-hold.png" target="_blank"><img src="screenshots/after/ewa-list-hold.png" alt="EWA blocked on hold" loading="lazy"></a><figcaption><b>Already built</b> — New EWA disabled with the reason for a held client.</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── RESCUE ───────────────────────── -->
+<h2 id="rescue">4 · Roadside rescue <small>(RES, BR-11, BR-01, BR-04)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>Rescue / problem type</td><td><span class="st FIXED">Fixed</span></td><td>Required <b>Problem type</b>: Flat / blown tire, Brake problem, Mechanical breakdown, Electrical / lights, Accident / collision, Other. Shown in the list and the detail.</td></tr>
+<tr><td>Full status set · detail with timeline, ETA, crew</td><td><span class="st FIXED">Fixed</span></td><td>The detail opens with a timeline: Requested → Verified → Confirmed → Dispatched → In Progress → Completed (or Cancelled / Blocked), with times. It also shows crew / vehicle and dispatcher ETA. These statuses already existed; there is no separate “Billed” status — billing is the debit memo shown on the charge.</td></tr>
+<tr><td>Charge breakdown</td><td><span class="st FIXED">Fixed</span></td><td>Table: travel (km × 2 × rate), tires, parts (with lines), subtotal, 10% service fee, 12% VAT, total, debit memo. Open RSC-000020 to check.</td></tr>
+<tr><td>Cancel action on Requested rows</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>“Cancel request” (reason required) while the status is Requested; the dispatcher is notified. Confirm whether the client may cancel later than this.</td></tr>
+<tr><td>Hold block (BR-01)</td><td><span class="st BUILT">Already built</span></td><td>Form hidden; red banner with the reason (screenshot below).</td></tr>
+<tr><td>Low / negative e-wallet warning (BR-04)</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Below the minimum, a warning explains the charge may take the wallet negative. Requests are still allowed; confirm that is right.</td></tr>
+<tr><td>Validation: phone, location, photos</td><td><span class="st FIXED">Fixed</span></td><td>PH number check (0917 123 4567 / +63 …); location was already required; photos: images only, ≤ 5 MB each, max 5 (proposed limit).</td></tr>
+<tr><td>Confirmation and internal notification</td><td><span class="st FIXED">Fixed</span></td><td>“Request RSC-… received — dispatcher notified”. Internal notification (rescue.requested) was already sent.</td></tr>
+<tr><td>Photo count / thumbnails</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Count in the list, file names in the detail. Thumbnails need real file storage.</td></tr>
+<tr><td>Branch / plate for the unit</td><td><span class="st FIXED">Fixed</span></td><td>The unit list reads “DW-MNL-1003 · 40ft flatbed · MNL”.</td></tr>
+<tr><td>Blank load status on RSC-000041</td><td><span class="st DATA">Data fixed</span></td><td>Now “Loaded”, with 2 photos.</td></tr>
+<tr><td>RSC-000020 missing from the list · charge not BR-11</td><td><span class="st DATA">Data fixed</span></td><td>Added as Completed: ₱2,000 + ₱12,650 + ₱1,465 + ₱1,933.80 = ₱18,048.80.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/before/rescue.png" target="_blank"><img src="screenshots/before/rescue.png" alt="Rescue before" loading="lazy"></a><figcaption><b>Before</b> — no problem type, load status “—” on RSC-000041, no RSC-000020.</figcaption></figure>
+  <figure><a href="screenshots/after/rescue.png" target="_blank"><img src="screenshots/after/rescue.png" alt="Rescue after" loading="lazy"></a><figcaption><b>After</b> — problem type, unit details, RSC-000020 with ₱18,048.80.</figcaption></figure>
+  <figure><a href="screenshots/after/rescue-detail-completed.png" target="_blank"><img src="screenshots/after/rescue-detail-completed.png" alt="Completed rescue" loading="lazy"></a><figcaption><b>After</b> — timeline and BR-11 breakdown.</figcaption></figure>
+  <figure><a href="screenshots/after/rescue-detail-open.png" target="_blank"><img src="screenshots/after/rescue-detail-open.png" alt="Open rescue" loading="lazy"></a><figcaption><b>After</b> — open request with “Cancel request”.</figcaption></figure>
+  <figure><a href="screenshots/after/rescue-errors.png" target="_blank"><img src="screenshots/after/rescue-errors.png" alt="Rescue validation" loading="lazy"></a><figcaption><b>After</b> — required fields and phone format check.</figcaption></figure>
+  <figure><a href="screenshots/after/rescue-hold.png" target="_blank"><img src="screenshots/after/rescue-hold.png" alt="Rescue on hold" loading="lazy"></a><figcaption><b>Already built</b> — held client: requests unavailable, with the reason.</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── INVOICES ───────────────────────── -->
+<h2 id="inv">5 · Invoices &amp; statement <small>(FIN, BR-05)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>Net, VAT and total per invoice</td><td><span class="st BUILT">Already built</span> / <span class="st FIXED">Fixed</span></td><td>The invoice view already showed them (click an invoice no.); now labelled “Net of VAT / VAT 12% / Total / Balance”. The list stays compact.</td></tr>
+<tr><td>Invoice detail with PDF, contract, unit, lines</td><td><span class="st FIXED">Fixed</span></td><td>The detail already had the lines, units and contract. Added: bill type, branch, terms, cancellation reason, and Print / PDF.</td></tr>
+<tr><td>Issue date column · days overdue</td><td><span class="st FIXED">Fixed</span></td><td>“Invoice date” column (newest first). Unpaid past-due rows show “N d overdue”.</td></tr>
+<tr><td>Receipt application · Official vs Provisional</td><td><span class="st FIXED">Fixed</span></td><td>The statement now shows “Official receipt OR-MNL-00000450 — From PR-MNL-00000447 · applied to INV-MNL-00001102”. The PR was cleared by Treasury and replaced by an OR.</td></tr>
+<tr><td>Credit Memo type (BR-05)</td><td><span class="st ANSWER">Answered</span></td><td>The statement already lists Credit / Debit Memo rows once applied to an invoice. ABC has none, so none show.</td></tr>
+<tr><td>Search, status filter</td><td><span class="st FIXED">Fixed</span></td><td>Search, plus All / Unpaid / Partly paid / Overdue / Paid / Cancelled.</td></tr>
+<tr><td>Date range · SOA period selector</td><td><span class="st OPEN">Open</span></td><td>Not done in this pass.</td></tr>
+<tr><td>Aging basis · payment terms</td><td><span class="st FIXED">Fixed</span></td><td>Page header: “Payment terms: 30 days from the invoice date; aging counts days past the due date.”</td></tr>
+<tr><td>Upload proof of payment · dispute invoice</td><td><span class="st OPEN">Open</span></td><td>Until decided, a client can use Send feedback → “Billing question”.</td></tr>
+<tr><td>Client name, code, branch on the statement</td><td><span class="st FIXED">Fixed</span></td><td>Statement header: name, code, billing cycle. The printed SOA already had the address.</td></tr>
+<tr><td>Invoice numbering · overlapping periods · duplicate</td><td><span class="st DATA">Data fixed</span></td><td>The cancelled duplicate is now INV-MNL-00001103 (same run as 1102, reason shown). The repair invoice 1118 covers its gate-in day only.</td></tr>
+<tr><td>Credit term vs due date</td><td><span class="st DATA">Data fixed</span></td><td>Root cause: dates were cut from UTC timestamps (a day early before 08:00 Manila). Now due = invoice date + 30, e.g. 13-Oct → 12-Nov.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/before/invoices.png" target="_blank"><img src="screenshots/before/invoices.png" alt="Invoices before" loading="lazy"></a><figcaption><b>Before</b> — no invoice date, no filters, duplicate numbered 1119, receipt labelled “Receipt”.</figcaption></figure>
+  <figure><a href="screenshots/after/invoices.png" target="_blank"><img src="screenshots/after/invoices.png" alt="Invoices after" loading="lazy"></a><figcaption><b>After</b> — invoice date, filters, terms, statement header, OR with source PR and application.</figcaption></figure>
+  <figure><a href="screenshots/before/invoice-detail.png" target="_blank"><img src="screenshots/before/invoice-detail.png" alt="Invoice detail before" loading="lazy"></a><figcaption><b>Before</b> — the detail existed but had no print.</figcaption></figure>
+  <figure><a href="screenshots/after/invoice-detail.png" target="_blank"><img src="screenshots/after/invoice-detail.png" alt="Invoice detail after" loading="lazy"></a><figcaption><b>After</b> — bill type, branch, terms, VAT split, Print / PDF.</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── WALLET ───────────────────────── -->
+<h2 id="wallet">6 · E-wallet &amp; cash bond <small>(EWL, BR-04, BR-14, BR-15, CLT-018)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>Top-up form</td><td><span class="st BUILT">Already built</span></td><td>Request top-up: amount, bank reference, proof of payment (PDF/image), pay-to bank, and the amount needed to reach the minimum. Screenshot below.</td></tr>
+<tr><td>Pending top-ups with status and amount</td><td><span class="st FIXED">Fixed</span></td><td>The Top-up requests card is always shown (date, amount, reference, status, rejection reason).</td></tr>
+<tr><td>Negative / below-minimum states</td><td><span class="st BUILT">Already built</span></td><td>Red tile “Negative — top up now” (Pacific Movers −₱2,500); amber below ₱12,500.</td></tr>
+<tr><td>Block or only warn below minimum</td><td><span class="st OPEN">Open</span></td><td>Currently warns only (BR-04 lets the wallet go negative).</td></tr>
+<tr><td>Ledger categories (rescue, repair, debit memo)</td><td><span class="st FIXED">Fixed</span></td><td>Type shows the category, e.g. “Deduction · Rescue”. Reversal entries already exist (see the Visayas Freight sample).</td></tr>
+<tr><td>Adjustment / refund types</td><td><span class="st OPEN">Open</span></td><td>The types need Finance sign-off.</td></tr>
+<tr><td>Cash bond tab and withdrawal dialog</td><td><span class="st BUILT">Already built</span></td><td>Cash bond tab with running balance; the withdrawal dialog has the deduction breakdown; the reason is shown when the button is disabled.</td></tr>
+<tr><td>Cash bond breakdown</td><td><span class="st FIXED">Fixed</span></td><td>Shown inline: “Bond ₱20,000 − unpaid invoices ₱79,120 = ₱0.00 (never below ₱0)”.</td></tr>
+<tr><td>Lock-in / pre-termination fees deducted from the bond (BR-15)</td><td><span class="st OPEN">Open</span></td><td>Not in the deduction formula yet.</td></tr>
+<tr><td>One bond per contract</td><td><span class="st ANSWER">Answered</span></td><td>Yes: one bond record per contract, one row each.</td></tr>
+<tr><td>Search, pagination · date range</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Search added; pages of 25. A date range is still open.</td></tr>
+<tr><td>Default sort</td><td><span class="st FIXED">Fixed</span></td><td>Ledger is newest first like the other lists (the running balance still reads per row). The statement of account stays oldest first, as is normal for statements.</td></tr>
+<tr><td>Missing RSC-000020 · OR vs PR series</td><td><span class="st DATA">Data fixed</span> / <span class="st ANSWER">Answered</span></td><td>RSC-000020 added. Top-ups post with an OR; the invoice payment PR was cleared and replaced by OR-MNL-00000450.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/before/ewallet.png" target="_blank"><img src="screenshots/before/ewallet.png" alt="E-wallet before" loading="lazy"></a><figcaption><b>Before</b> — no threshold stated, no top-up card, no bond breakdown.</figcaption></figure>
+  <figure><a href="screenshots/after/ewallet.png" target="_blank"><img src="screenshots/after/ewallet.png" alt="E-wallet after" loading="lazy"></a><figcaption><b>After</b> — amber rule, bond breakdown, top-up card, categories, newest first.</figcaption></figure>
+  <figure><a href="screenshots/after/ewallet-topup.png" target="_blank"><img src="screenshots/after/ewallet-topup.png" alt="Top-up form" loading="lazy"></a><figcaption><b>Already built</b> — top-up request form.</figcaption></figure>
+  <figure><a href="screenshots/after/ewallet-cashbond.png" target="_blank"><img src="screenshots/after/ewallet-cashbond.png" alt="Cash bond tab" loading="lazy"></a><figcaption><b>Already built</b> — Cash bond ledger tab.</figcaption></figure>
+  <figure><a href="screenshots/after/ewallet-hold.png" target="_blank"><img src="screenshots/after/ewallet-hold.png" alt="Negative wallet" loading="lazy"></a><figcaption><b>Already built</b> — negative wallet state (Pacific Movers).</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── CONTRACTS ───────────────────────── -->
+<h2 id="contracts">7 · Contracts <small>(CLT, CNC, BR-12, BR-14, BR-15, BR-18)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>Units on the contract · entitled quantity per type</td><td><span class="st FIXED">Fixed</span></td><td>“Units on hire under this contract (5)” with type; “Entitled: 5 units” on the rate cards. Showing these exposed N1 / N2 below.</td></tr>
+<tr><td>Lock-in · pre-termination fee (BR-15)</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Lock-in 12 months shown. The data model has no pre-termination fee amount.</td></tr>
+<tr><td>Rate effective date · VAT basis · rate history</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>“Daily rates per unit, exclusive of 12% VAT · effective 16-Apr-2026” (billing adds VAT on top). Rate history (BR-18) is open.</td></tr>
+<tr><td>Branches covered · late fee and penalties · minimum billing days</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Shown: branches covered, late interest 2%/month, non-return ₱5,000/unit, dishonored check ₱2,500, e-wallet minimum, units contracted. Minimum billing days are not defined.</td></tr>
+<tr><td>Signature status and dates</td><td><span class="st FIXED">Fixed</span></td><td>Signed 11-Apr-2026, notarized 14-Apr-2026, from the contract history.</td></tr>
+<tr><td>Notarised copy required by type</td><td><span class="st OPEN">Open</span></td><td>—</td></tr>
+<tr><td>Renew / amend / terminate request</td><td><span class="st FIXED">Fixed</span></td><td>Button opens the feedback form with the category and contract already filled in.</td></tr>
+<tr><td>Expiry notice</td><td><span class="st BUILT">Already built</span> / <span class="st OPEN">Open</span></td><td>“Expires in N days” turns amber within 30 days. Whether the client also gets an email is open.</td></tr>
+<tr><td>Several contracts layout</td><td><span class="st OPEN">Open</span></td><td>Contracts stack as cards; no demo client has two.</td></tr>
+<tr><td>Credit term vs due date</td><td><span class="st DATA">Data fixed</span></td><td>See Invoices: due = invoice date + 30 days.</td></tr>
+<tr><td>8 vs 7 equipment types (Q-CLT-01) · rate order</td><td><span class="st OPEN">Open</span></td><td>Demo rates are base + ₱50 per type, which is why the 20ft flatbed is the highest. Real rates come from the rate card.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/before/contracts.png" target="_blank"><img src="screenshots/before/contracts.png" alt="Contracts before" loading="lazy"></a><figcaption><b>Before</b> — 3 terms and rates only.</figcaption></figure>
+  <figure><a href="screenshots/after/contracts.png" target="_blank"><img src="screenshots/after/contracts.png" alt="Contracts after" loading="lazy"></a><figcaption><b>After</b> — full terms, VAT basis, entitlement, units, signature dates, request action.</figcaption></figure>
+  <figure><a href="screenshots/after/contract-request.png" target="_blank"><img src="screenshots/after/contract-request.png" alt="Contract request" loading="lazy"></a><figcaption><b>After</b> — renewal request, pre-filled.</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── VENDOR ───────────────────────── -->
+<h2 id="vendor">8 · Vendor portal <small>(PRC, BR-09, BR-10)</small></h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Review item</th><th>Status</th><th>What was done · how to check</th></tr>
+<tr><td>PO detail: lines, qty, unit price</td><td><span class="st BUILT">Already built</span></td><td>Click a PO row: lines with qty, received, unit price, amount, and “invoiced so far”. Screenshot below.</td></tr>
+<tr><td>Upload invoice form and rules</td><td><span class="st BUILT">Already built</span></td><td>PO selector, invoice no., date, amount, file (PDF/image ≤ 10 MB), ordered items, and a warning when the amount exceeds the PO balance not yet invoiced.</td></tr>
+<tr><td>Invoice status values</td><td><span class="st BUILT">Already built</span> / <span class="st OPEN">Open</span></td><td>Submitted, Under Review, Approved, Paid, Rejected exist. Payment date and rejection reason are open.</td></tr>
+<tr><td>Paid tile period · outstanding total</td><td><span class="st FIXED">Fixed</span> / <span class="st OPEN">Open</span></td><td>Labelled “All time”. An outstanding total is open.</td></tr>
+<tr><td>PO statuses, receiving link, VAT basis, branch prefix, acknowledgement, upload rule, filters</td><td><span class="st OPEN">Open</span></td><td>Need Procurement decisions; see the open list.</td></tr>
+</table></div>
+<div class="shots">
+  <figure><a href="screenshots/after/vendor-po.png" target="_blank"><img src="screenshots/after/vendor-po.png" alt="PO detail" loading="lazy"></a><figcaption><b>Already built</b> — PO detail.</figcaption></figure>
+  <figure><a href="screenshots/after/vendor-upload.png" target="_blank"><img src="screenshots/after/vendor-upload.png" alt="Upload invoice" loading="lazy"></a><figcaption><b>Already built</b> — upload invoice form.</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── ACCOUNT ───────────────────────── -->
+<h2 id="account">Account menu, feedback and password</h2>
+<div class="shots">
+  <figure><a href="screenshots/after/account-menu.png" target="_blank"><img src="screenshots/after/account-menu.png" alt="Account menu" loading="lazy"></a><figcaption><b>After</b> — the user name opens Change password / Send feedback / Sign out.</figcaption></figure>
+  <figure><a href="screenshots/after/feedback.png" target="_blank"><img src="screenshots/after/feedback.png" alt="Feedback" loading="lazy"></a><figcaption><b>After</b> — Send feedback (DBL-CLT-017).</figcaption></figure>
+  <figure><a href="screenshots/after/change-password.png" target="_blank"><img src="screenshots/after/change-password.png" alt="Change password" loading="lazy"></a><figcaption><b>After</b> — Change password (ADM-004).</figcaption></figure>
+</div>
+
+<!-- ───────────────────────── NEW FINDINGS ───────────────────────── -->
+<h2 id="new">New findings (not in Review 1.1)</h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Finding</th><th>Status</th><th>Detail · suggested action</th></tr>
+<tr><td>N1 · Units on hire are types the contract does not entitle</td><td><span class="st NEW">New finding</span></td><td>LTL-2026-0045 entitles 5 × 20ft chassis and 5 × 40ft chassis, but 4 of the 5 units on hire are a 40ft flatbed, 45ft chassis, 40ft super combo and 40ft flatbed. Decide the entitlement rule, then correct the sample data and enforce it on New EWA.</td></tr>
+<tr><td>N2 · Units released at branches outside the client’s branch access</td><td><span class="st NEW">New finding</span></td><td>ABC may use MNL, NVL and CAV, but units on hire came from BTG, CLK and CDO. Either the access list or the sample releases are wrong.</td></tr>
+<tr><td>N3 · Staff app still has the old sample data</td><td><span class="st NEW">New finding</span></td><td>The portal and staff app are now separate projects with separate seeds. The staff app still shows EU-000770 cancelled in the Audit log, ₱12,000 in the wallet, and no RSC-000020. Apply the same seed changes to <code>frontend-staff</code> before the next cross-screen review.</td></tr>
+<tr><td>N4 · Other clients’ invoice numbers out of date order</td><td><span class="st NEW">New finding</span></td><td>INV-MNL-00001105 (Metro Container) is dated before 1101–1103. Not visible to ABC; staff-side data.</td></tr>
+<tr><td>N5 · UTC date cut elsewhere in the seed</td><td><span class="st NEW">New finding</span></td><td>Registrations, stock counts and similar date-only fields still use the UTC date. Use the new <code>manilaDay()</code> helper there too (both projects).</td></tr>
+</table></div>
+
+<!-- ───────────────────────── OPEN ───────────────────────── -->
+<h2 id="open">Open decisions for the business</h2>
+<div class="scroll"><table class="tbl">
+<tr><th>Owner</th><th>#</th><th>Question</th></tr>
+<tr><td>Finance</td><td>1</td><td>Confirm the amber threshold of 125% of the minimum (₱12,500), and whether the client is notified by email when below the minimum (EWL-004).</td></tr>
+<tr><td>Finance</td><td>2</td><td>Below the minimum: block new rescue / EWA requests, or only warn (current)?</td></tr>
+<tr><td>Finance / C&amp;C</td><td>3</td><td>Should the due date run from client acknowledgment of receipt (DBL-CNC-005) instead of invoice date + term?</td></tr>
+<tr><td>Finance</td><td>4</td><td>Can clients upload proof of payment against an invoice, or dispute an invoice, in the portal?</td></tr>
+<tr><td>Finance</td><td>5</td><td>E-wallet adjustment and refund entry types; are lock-in / pre-termination fees (BR-15) deducted from the cash bond, and how much is the pre-termination fee?</td></tr>
+<tr><td>Finance</td><td>6</td><td>Invoice list and SOA date range / period selector — needed for launch?</td></tr>
+<tr><td>Operations</td><td>7</td><td>Confirm the plate (NAB 5678 / AB 1234 / ABC 123) and licence (N01-23-456789) formats.</td></tr>
+<tr><td>Operations</td><td>8</td><td>Contract entitlement: does New EWA quantity stop at the entitled quantity per type? (see N1)</td></tr>
+<tr><td>Operations</td><td>9</td><td>One equipment type per EWA, or several (the API already supports several)?</td></tr>
+<tr><td>Operations</td><td>10</td><td>Truck OR/CR captured in the portal or only at the gate (current)?</td></tr>
+<tr><td>Operations</td><td>11</td><td>Expected pickup time and remarks on New EWA; saved drivers / trucks list.</td></tr>
+<tr><td>Operations</td><td>12</td><td>Released &lt; requested: do unreleased units expire with the EWA?</td></tr>
+<tr><td>Operations</td><td>13</td><td>Client may request an extension only after expiry (current); is that acceptable?</td></tr>
+<tr><td>Operations</td><td>14</td><td>Until which rescue status may the client cancel (currently Requested only)? Do cancellations carry a charge?</td></tr>
+<tr><td>Operations</td><td>15</td><td>Should repair job orders appear as service tickets on the dashboard (RPT-009)?</td></tr>
+<tr><td>IT</td><td>16</td><td>Photo limits (5 photos, 5 MB each) and file storage for thumbnails.</td></tr>
+<tr><td>IT</td><td>17</td><td>Profile editing and in-app notifications in the portal.</td></tr>
+<tr><td>Sales</td><td>18</td><td>Is a notarized copy required for every contract type or only LTL / SPL / QLP?</td></tr>
+<tr><td>Sales</td><td>19</td><td>Contract expiry notice: should the client get an email N days before the end date?</td></tr>
+<tr><td>Sales</td><td>20</td><td>Rate history (BR-18) and minimum billing days on the contract page.</td></tr>
+<tr><td>Master data</td><td>21</td><td>Q-CLT-01: 7 FRS equipment names vs 8 in master data; confirm the real rate order.</td></tr>
+<tr><td>Procurement</td><td>22</td><td>PO status set and receiving-report link in the vendor portal; PO branch prefix.</td></tr>
+<tr><td>Procurement</td><td>23</td><td>Are PO totals VAT-inclusive? (₱116,000 ÷ 1.12 is not round.)</td></tr>
+<tr><td>Procurement</td><td>24</td><td>When may a vendor upload an invoice: any open PO (current) or only after receiving?</td></tr>
+<tr><td>Procurement</td><td>25</td><td>Vendor PO acknowledgement, payment date and rejection reason on invoices, outstanding total, search / filters.</td></tr>
+</table></div>
+
+<!-- ───────────────────────── FILES ───────────────────────── -->
+<h2 id="files">Files changed</h2>
+<ul class="list">
+  <li><code>src/pages/client.tsx</code> — Dashboard, EWA (form, confirmation, list, detail, print), Rescue, Invoices &amp; SOA (filters, print), E-wallet, Contracts, the shared Feedback dialog.</li>
+  <li><code>src/router.tsx</code> — account menu, Change password, Account Executive footer, menu label.</li>
+  <li><code>src/pages/vendor.tsx</code> — Paid tile period.</li>
+  <li><code>src/lib/api-client/api.ts</code> — dashboard data (returns, open rescues, active contracts, AE, oldest-due amount), newest-first lists, EWA gate passes, client feedback, client rescue cancel, rescue problem type, receipt labels on the SOA.</li>
+  <li><code>src/lib/api-client/seed.ts</code>, <code>seedAdmin.ts</code>, <code>db.ts</code> — sample data fixes, mock DB version 13.</li>
+  <li><code>src/lib/shared/format.ts</code> — <code>manilaDay()</code>; <code>types.ts</code> — <code>problemType</code>, <code>ClientFeedback</code>.</li>
+  <li><code>src/lib/shared/changelog.ts</code> and <code>CHANGELOG.md</code> — four entries dated 02-Nov-2026.</li>
+</ul>
+<p class="muted">Screenshots: <code>screenshots/before/</code> (code as it was) and <code>screenshots/after/</code> (fixed code). Both sets were captured at 1280 px in Chrome, Asia/Manila time, each from a fresh demo database.</p>
+
+</div>
+</body>
+</html>
