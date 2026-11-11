@@ -90,3 +90,31 @@ export function agingBucket(daysOverdue: number): keyof Omit<AgingBuckets, 'tota
   if (daysOverdue <= 180) return 'd91_180';
   return 'd180';
 }
+
+// ── Client portal dashboard review (2026-11-11) ────────────────────────────
+/**
+ * E-wallet states shown on every portal screen (proposed — Finance to confirm, EWL-004):
+ *  healthy  — at or above 125% of the minimum
+ *  near     — at or above the minimum but below 125% of it (amber)
+ *  below    — ₱0 up to the minimum (red: below the contract minimum, top-up required)
+ *  negative — below ₱0 (red: charges exceeded the balance; the shortfall is owed)
+ */
+export type WalletStateKey = 'healthy' | 'near' | 'below' | 'negative';
+export const WALLET_NEAR_FACTOR = 1.25;
+export function walletState(balance: number, minimum: number, nearFactor = WALLET_NEAR_FACTOR): WalletStateKey {
+  if (balance < 0) return 'negative';
+  if (balance < minimum) return 'below';
+  if (balance < minimum * nearFactor) return 'near';
+  return 'healthy';
+}
+
+/**
+ * Hire duration of a unit: calendar days between Gate Out and Gate In (or today), on Manila days,
+ * plus the billable days under the proposed billing rule (Q-FIN-02: pickup day and return day both count).
+ * 27-Aug → 06-Oct = 40 calendar days, 41 billable days.
+ */
+export function hireDays(outIso: string, inIso?: string) {
+  const end = inIso ?? new Date().toISOString();
+  const calendar = Math.max(0, manilaDayIndex(end) - manilaDayIndex(outIso));
+  return { calendar, billable: calendar + 1 };
+}

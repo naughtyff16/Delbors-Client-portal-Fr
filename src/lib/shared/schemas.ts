@@ -28,18 +28,57 @@ export const clientInternalSchema = z.object({
 });
 export type ClientInternalForm = z.infer<typeof clientInternalSchema>;
 
-export const clientPortalSchema = z.object({
+// ── Portal identity & password rules (portal sign-in review 2026-11-11) ─────
+/** Email is the sign-in ID for client and vendor portal users: compared trimmed and case-insensitive. */
+export const normalizeEmail = (e: string) => e.trim().toLowerCase();
+/** "client@abclogistics.ph" → "cl****@abclogistics.ph" (shown on the one-time-code step). */
+export function maskEmail(e: string) {
+  const [name, domain] = e.split('@');
+  if (!domain) return e;
+  return `${name.slice(0, Math.min(2, name.length))}${'*'.repeat(Math.max(2, name.length - 2))}@${domain}`;
+}
+/** BIR TIN: 000-000-000 plus an optional 3–5 digit branch code. */
+export const TIN_PATTERN = /^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/;
+export const tinDigits = (t?: string) => (t ?? '').replace(/\D/g, '');
+
+/** Password rules from System settings (auth.password_min_length) — the same list drives the live checklist and the server check. */
+export function passwordChecks(pw: string, minLen = 10, email?: string) {
+  const local = email ? normalizeEmail(email).split('@')[0] : '';
+  return [
+    { key: 'length', label: `At least ${minLen} characters`, ok: pw.length >= minLen },
+    { key: 'upper', label: 'An uppercase letter (A–Z)', ok: /[A-Z]/.test(pw) },
+    { key: 'lower', label: 'A lowercase letter (a–z)', ok: /[a-z]/.test(pw) },
+    { key: 'digit', label: 'A number (0–9)', ok: /\d/.test(pw) },
+    ...(local.length >= 3 ? [{ key: 'email', label: 'Does not contain your email name', ok: !!pw && !pw.toLowerCase().includes(local) }] : []),
+  ];
+}
+export const passwordOk = (pw: string, minLen = 10, email?: string) => passwordChecks(pw, minLen, email).every((c) => c.ok);
+
+/** Supporting documents accepted with a portal access request. */
+export const ACCESS_DOC_MAX_MB = 5;
+export const ACCESS_DOC_ACCEPT = 'application/pdf,image/jpeg,image/png';
+
+/** Portal access request (client or vendor). Password minimum length follows System settings. */
+export const portalAccessSchema = (minLen = 10) => z.object({
+  accountType: z.enum(['client', 'vendor']),
   clientName: req('Company name').max(150),
+  tin: z.string().trim().min(1, 'TIN is required').regex(TIN_PATTERN, 'Use the BIR format 000-000-000-000'),
   branchCode: req('Branch'),
   address1: req('Business address').max(150),
   firstName: req('First name').max(100),
   lastName: req('Last name').max(100),
   phone,
-  email: z.string().email('Enter a valid email'),
-  password: z.string().min(10, 'At least 10 characters').regex(/[A-Z]/, 'Include an uppercase letter').regex(/[a-z]/, 'Include a lowercase letter').regex(/\d/, 'Include a digit'),
+  email: z.string().trim().email('Enter a valid email'),
+  documents: z.array(z.string()).min(1, 'Attach at least one supporting document'),
+  password: z.string(),
   confirm: z.string(),
   consent: z.literal(true, { errorMap: () => ({ message: 'Consent is required under the Data Privacy Act' }) }),
-}).refine((v) => v.password === v.confirm, { path: ['confirm'], message: "Passwords don't match" });
+}).superRefine((v, ctx) => {
+  const failed = passwordChecks(v.password, minLen, v.email).find((c) => !c.ok);
+  if (failed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['password'], message: `Password needs: ${failed.label.toLowerCase()}` });
+  if (v.password !== v.confirm) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['confirm'], message: "Passwords don't match" });
+});
+export const clientPortalSchema = portalAccessSchema(10);
 export type ClientPortalForm = z.infer<typeof clientPortalSchema>;
 
 export const ewaSchema = z.object({
@@ -51,8 +90,13 @@ export const ewaSchema = z.object({
   truckPlateNo: req('Truck plate no.'),
   trucker: req('Trucker'),
   units: z.array(z.object({ equipmentType: req('Equipment type'), qty: z.coerce.number().int().min(1, 'Min 1') })).min(1, 'Add at least one unit'),
+  // Portal New EWA review (2026-11-11): optional extras.
+  truckOrcr: z.string().optional(), expectedPickupAt: z.string().optional(), remarks: z.string().optional(),
 });
 export type EwaForm = z.infer<typeof ewaSchema>;
+/** LTO formats (proposed — Operations / Gate to confirm): plate "ABC 1234" / "AB 1234" / "ABC 123"; driver licence "N01-23-456789". Checked in the form and by the API. */
+export const PLATE_RE = /^[A-Z]{2,3} ?\d{3,4}$/;
+export const LICENCE_RE = /^[A-Z]\d{2}-\d{2}-\d{6}$/;
 
 export const rescueRequestSchema = z.object({
   chassisNo: req('Chassis / unit'),

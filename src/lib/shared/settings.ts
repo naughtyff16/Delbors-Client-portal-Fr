@@ -83,6 +83,15 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   { key: 'auth.max_failed_logins', label: 'Max failed logins before lock', group: 'Security', type: 'number', value: 5, rule: 'SCR-01' },
   { key: 'auth.lockout_minutes', label: 'Lockout duration (minutes)', group: 'Security', type: 'number', value: 30, rule: 'SCR-01' },
   { key: 'auth.password_min_length', label: 'Password minimum length', group: 'Security', type: 'number', value: 10, rule: 'SCR-02' },
+  // Portal sign-in review (2026-11-11): session timeout, second factor, reset link and support contacts — proposed defaults, confirm with Delbros.
+  { key: 'auth.portal_session_timeout_minutes', label: 'Portal session timeout after inactivity (minutes)', group: 'Security', type: 'number', value: 15, rule: 'SCR-01 (Q-SEC-02)', pending: true },
+  { key: 'auth.portal_second_factor', label: 'Portal second factor at sign-in', group: 'Security', type: 'text', value: 'email_otp', rule: 'SCR-01 (Q-SEC-03)', pending: true },
+  { key: 'auth.reset_link_minutes', label: 'Password reset link validity (minutes)', group: 'Security', type: 'number', value: 30, rule: 'US-ADM-004 (Q-SEC-01)', pending: true },
+  { key: 'portal.client_support_phone', label: 'Portal — client support phone (sign-in page)', group: 'Portal', type: 'text', value: '+63 2 8000 1000', rule: 'Portal sign-in (Q-PTL-01)', pending: true },
+  { key: 'portal.client_support_email', label: 'Portal — client support email (sign-in page)', group: 'Portal', type: 'text', value: 'clientcare@demo.delbros.local', rule: 'Portal sign-in (Q-PTL-01)', pending: true },
+  { key: 'portal.vendor_support_phone', label: 'Portal — Procurement contact phone (vendor sign-in)', group: 'Portal', type: 'text', value: '+63 2 8000 2000', rule: 'Portal sign-in (Q-PTL-01)', pending: true },
+  { key: 'portal.vendor_support_email', label: 'Portal — Procurement contact email (vendor sign-in)', group: 'Portal', type: 'text', value: 'procurement@demo.delbros.local', rule: 'Portal sign-in (Q-PTL-01)', pending: true },
+  { key: 'portal.dpo_email', label: 'Data Protection Officer email (privacy notice)', group: 'Portal', type: 'text', value: 'dpo@demo.delbros.local', rule: 'RA 10173 (Q-PTL-02)', pending: true },
   { key: 'alo.idle_days_threshold', label: 'Idle unit flag after (days)', group: 'Allocation', type: 'number', value: 30, rule: 'DCIR (TBD)', pending: true },
   { key: 'alo.reg_warn_days', label: 'Warn on Allocate when registration expires within (days); expired = blocked', group: 'Allocation', type: 'number', value: 14, rule: 'DBL-ALO-003 (proposed default — confirm rule)', pending: true },
   { key: 'alo.parkfix_daily_rate', label: 'Park & Fix daily rate (override needs Park & Fix approve permission)', group: 'Allocation', type: 'money', value: 350, rule: 'DBL-ALO-005 (Q-ALO-02)', pending: true },
@@ -124,6 +133,12 @@ export const SETTING_META: Record<string, Partial<SettingDef>> = {
   'auth.max_failed_logins': { unit: 'attempts', integer: true, min: 3, max: 10, pending: true, decision: 'Q-SEC-01', sensitive: true },
   'auth.lockout_minutes': { unit: 'minutes', integer: true, min: 5, max: 1440, pending: true, decision: 'Q-SEC-01', sensitive: true },
   'auth.password_min_length': { unit: 'characters', integer: true, min: 8, max: 64, pending: true, decision: 'Q-SEC-01', sensitive: true },
+  'auth.portal_session_timeout_minutes': { unit: 'minutes', integer: true, min: 5, max: 240, decision: 'Q-SEC-02', sensitive: true, help: 'Portal users are signed out after this many minutes without activity. A warning with “Stay signed in” appears one minute before.' },
+  'auth.portal_second_factor': { decision: 'Q-SEC-03', sensitive: true, options: [{ value: 'email_otp', label: 'Email one-time code (6 digits, 5 minutes)' }, { value: 'off', label: 'Off — password only' }],
+    help: 'Whether client and vendor portal users must enter a one-time code after their password. Proposed default: email code. An authenticator app can be added later if Delbros prefers it.' },
+  'auth.reset_link_minutes': { unit: 'minutes', integer: true, min: 10, max: 1440, decision: 'Q-SEC-01', sensitive: true },
+  'portal.client_support_phone': { decision: 'Q-PTL-01' }, 'portal.client_support_email': { decision: 'Q-PTL-01' },
+  'portal.vendor_support_phone': { decision: 'Q-PTL-01' }, 'portal.vendor_support_email': { decision: 'Q-PTL-01' }, 'portal.dpo_email': { decision: 'Q-PTL-02' },
   'alo.idle_days_threshold': { ...D, min: 1, max: 365 },
 };
 

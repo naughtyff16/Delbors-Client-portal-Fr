@@ -5,7 +5,7 @@ import {
   type Assessment, type Client, type Contract, type ContractType, type EwaForm, type GateAction, type Grants, type InspectionLine,
   type Invoice, type JobOrder, type NotificationRule, type RepairCategory, type RescueRequest, type RoleCode, type StockTxnType, type User,
   type ClientInternalForm, type ClientPortalForm, type RescueRequestForm, type PaymentStatus, type AgingBuckets,
-  type EwalletCategory, type EwalletTxn, nextCollectionStage,
+  type EwalletCategory, type EwalletTxn, nextCollectionStage, hireDays, PLATE_RE, LICENCE_RE, type Ewa, type EwaDelivery,
 } from '../shared';
 import {
   ApiError, audit, canActOn, db, decide, delay, inScope, me, nextNo, notify, onWorkflowDone, persist, requirePerm, session, setSession,
@@ -17,6 +17,11 @@ import { invoiceDates, periodDays, memoApprovalChain, debitMemoTotal, CREDIT_MEM
 // ── Admin (SUP-04/05/06) helpers ──
 import { addDays, DEFAULT_SETTINGS, settingMeta, validateSetting, type RateCardRow } from '../shared';
 import { auditHash } from './core';
+// ── Portal sign-in (client & vendor) ──
+import {
+  checkResetToken, creditContact, demoResetToken, demoSignInCode, expireSession, portalPolicy, portalSignIn, requestPasswordReset, requestPortalAccess,
+  resendSignInCode, resetPassword, verifySignInCode, type PortalRealm,
+} from './portalAuth';
 import { applyAdminSeed } from './seedAdmin';
 export type MasterKind = 'branch' | 'equipmentType' | 'part' | 'vendor' | 'warehouse' | 'list';
 const masterRef = (kind: MasterKind): { list: () => unknown[]; key: string } => ({
@@ -36,6 +41,74 @@ const nowIso = () => new Date().toISOString();
 const S = () => settings();
 const clientOf = (code: string) => db.clients.find((c) => c.clientCode === code);
 const clientName = (code?: string) => (code ? clientOf(code)?.clientName ?? code : '—');
+/**
+ * Gate pass number in the FRS format (GEN0001 / CEB0001): the branch's gate-pass prefix + a per-branch sequence of
+ * gat.gatepass_seq_digits digits (Q-GAT-07). Portal dashboard review 2026-11-11 — replaces the GP-MNL-000881 format.
+ */
+export function gatePassNo(branchCode: string) {
+  const prefix = db.branches.find((b) => b.code === branchCode)?.gatePassPrefix || branchCode;
+  const digits = Number(S()['gat.gatepass_seq_digits'] ?? 4);
+  const key = `GP.${branchCode}`;
+  if (db.seq[key] == null) {
+    // First pass at this branch: continue after the highest number already issued with this prefix.
+    const re = new RegExp(`^${prefix}(\\d+)$`);
+    db.seq[key] = Math.max(0, ...db.gatePasses.map((g) => Number(re.exec(g.gatePassNo)?.[1] ?? 0)));
+  }
+  return nextNo(key, prefix, digits);
+}
+// ── Portal New EWA review (2026-11-11) ─────────────────────────────────────
+/** Units of one equipment type free for release at a branch (status Available). */
+const availableUnits = (branchCode: string, equipmentType: string) =>
+  db.chassis.filter((x) => x.branchCode === branchCode && x.chassisType === equipmentType && x.status === 'Available').length;
+/**
+ * What a client can still request under a contract: per type when the contract sets an entitled quantity for it (Contracts page
+ * "Entitled: N units"), and in total against the contract's unit quantity. Units on hire and units still to be released on open
+ * EWAs (Active, Partially Used, Extension Pending) both count against it.
+ */
+export function ewaEntitlement(ct: Contract) {
+  const onHire = db.chassis.filter((x) => x.currentContractNo === ct.contractNo && ['On Hire', 'Rescue'].includes(x.status));
+  const open = db.ewas.filter((e) => e.contractNo === ct.contractNo && ['Active', 'Partially Used', 'Extension Pending'].includes(e.status));
+  const pendingOf = (eq?: string) => open.reduce((a, e) => a + e.units.filter((l) => !eq || l.equipmentType === eq).reduce((s, l) => s + Math.max(0, l.qty - l.usedChassis.length), 0), 0);
+  const contractRemaining = Math.max(0, ct.unitQty - onHire.length - pendingOf());
+  return {
+    unitQty: ct.unitQty, onHire: onHire.length, pending: pendingOf(), contractRemaining,
+    types: ct.rates.map((r) => {
+      const oh = onHire.filter((x) => x.chassisType === r.equipmentType).length;
+      const pd = pendingOf(r.equipmentType);
+      const typeLeft = r.qty ? Math.max(0, r.qty - oh - pd) : undefined;
+      return { equipmentType: r.equipmentType, entitled: r.qty || undefined, onHire: oh, pending: pd, dailyRate: r.dailyRate, remaining: typeLeft == null ? contractRemaining : Math.min(typeLeft, contractRemaining) };
+    }),
+  };
+}
+/**
+ * GAT-002 / N08: the full-detail EWA email goes to the client (the portal user who created it and the company email) and to Delbros
+ * (the pickup branch's Branch Generalists and the Account Executive). The mock records each send as Sent; the mail service sets the real status.
+ */
+function ewaDelivery(e: Ewa, c: Client, resend = false): EwaDelivery[] {
+  const at = nowIso();
+  const out: EwaDelivery[] = [];
+  const add = (audience: EwaDelivery['audience'], recipient: string, to?: string) => { if (to && !out.some((d) => d.to === to)) out.push({ at, channel: 'Email', audience, recipient, to, status: 'Sent', ...(resend ? { resend } : {}) }); };
+  const creator = db.users.find((x) => x.userId === e.createdBy);
+  if (creator?.realm === 'CLIENT_PORTAL') add('Client', creator.name, creator.email);
+  add('Client', `${c.clientName} (company email)`, c.email);
+  db.users.filter((x) => x.realm === 'INTERNAL' && x.status === 'Active' && x.roles.includes('BRANCH_GENERALIST') && x.branchCode === e.branchCode).forEach((x) => add('Delbros', `${x.name} — Branch Generalist, ${e.branchCode}`, x.email));
+  const ae = db.users.find((x) => x.userId === c.aeAssigned);
+  if (ae) add('Delbros', `${ae.name} — Account Executive`, ae.email);
+  return out;
+}
+
+/** Notification links are written for the staff app; a portal user gets the matching portal screen (record opened when the screen supports it). */
+function portalLink(link?: string) {
+  if (!link) return '/client';
+  if (link.startsWith('/client')) return link;
+  const id = link.split(/[/?]/).filter(Boolean)[1];
+  if (link.startsWith('/rescue')) return id && /^RSC-/.test(id) ? `/client/rescue?open=${id}` : '/client/rescue';
+  if (link.startsWith('/ewallet') || link.startsWith('/cashbond')) return '/client/ewallet';
+  if (link.startsWith('/billing') || link.startsWith('/invoices') || link.startsWith('/credit')) return id && /^INV-/.test(id) ? `/client/invoices?open=${id}` : '/client/invoices';
+  if (link.startsWith('/contracts')) return '/client/contracts';
+  if (link.startsWith('/gate') || link.startsWith('/ewa')) return id && /^EU-/.test(id) ? `/client/ewa?open=${id}` : '/client/ewa';
+  return '/client';
+}
 const mustClient = (code: string) => { const c = clientOf(code); if (!c) throw new ApiError('NOT_FOUND', `Client ${code} not found.`, 404); return c; };
 const mustChassis = (no: string) => { const c = db.chassis.find((x) => x.chassisNo === no); if (!c) throw new ApiError('NOT_FOUND', `Chassis ${no} not found.`, 404); return c; };
 const assertGate = (clientCode: string, action: GateAction) => {
@@ -160,7 +233,7 @@ onWorkflowDone('JOB_ORDER', (wf, ok) => {
 });
 onWorkflowDone('FORCE_INBOUND', (wf, ok) => {
   const c = db.chassis.find((x) => x.chassisNo === wf.subjectId); if (!c || !ok) return;
-  const gpNo = nextNo('GP', `GP-${c.branchCode}-`, 6);
+  const gpNo = gatePassNo(c.branchCode);
   const fiOut = db.gatePasses.find((g) => g.direction === 'OUT' && g.chassisNo === c.chassisNo && !g.pairedGatePassNo);
   const fiEir = fiOut ? db.eirs.find((x) => x.gatePassOutNo === fiOut.gatePassNo) : undefined;
   db.gatePasses.unshift({ gatePassNo: gpNo, direction: 'IN', chassisNo: c.chassisNo, clientCode: c.currentClientCode ?? '', contractNo: c.currentContractNo ?? '', trucker: '—', truckPlateNo: '—', driverName: '—', driverLicenseNo: '—', generalAssessment: 'Unroadworthy', inspection: [], actualEventAt: nowIso(), encodedAt: nowIso(), branchCode: c.branchCode, isForceInbound: true, eirNo: fiEir?.eirNo ?? '—', pairedGatePassNo: fiOut?.gatePassNo, remarks: 'Force Inbound (WF-12) — loss/indemnity settled', encodedBy: session()?.userId ?? 'system' });
@@ -439,7 +512,21 @@ export const api = {
         u.password = next; audit('auth.password_changed', 'user', u.userId); return true;
       });
     },
-    async forgotPassword(_idOrEmail: string) { await delay(300); return true; },
+    // ── Portal sign-in (client & vendor) — portal sign-in review 2026-11-11, see ./portalAuth.ts ──
+    /** Public sign-in policy (lockout, password rules, session timeout, second factor, support contacts). */
+    policy: () => portalPolicy(),
+    /** Email + password; returns signed_in, or otp_required when the second factor is on. Account states are refused here (hold is not). */
+    async portalLogin(email: string, password: string, realm: PortalRealm) { applyAdminSeed(db); applyScheduledSettings(); return portalSignIn(email, password, realm); },
+    verifyOtp: (challengeId: string, code: string) => verifySignInCode(challengeId, code),
+    resendOtp: (challengeId: string) => resendSignInCode(challengeId),
+    /** DEMO ONLY — the code that would be emailed (used by the review demo box when showDemoLogins is on). */
+    demoOtp: (challengeId: string) => demoSignInCode(challengeId),
+    expireSession: (idleMinutes: number) => expireSession(idleMinutes),
+    async forgotPassword(email: string) { return requestPasswordReset(email); },
+    /** DEMO ONLY — the reset link token that would be emailed. */
+    demoResetToken: (email: string) => demoResetToken(email),
+    checkResetToken: (token: string) => checkResetToken(token),
+    resetPassword: (token: string, password: string) => resetPassword(token, password),
     demoAccounts() {
       return db.users.map((u) => ({ userId: u.userId, name: u.name, designation: u.designation, realm: u.realm, roles: u.roles }));
     },
@@ -708,22 +795,8 @@ export const api = {
         return { client: c, possibleDuplicate: dup?.clientCode };
       });
     },
-    async registerPortal(f: ClientPortalForm) {
-      await delay(400);
-      if (db.users.some((u) => u.userId.toLowerCase() === f.email.toLowerCase())) throw new ApiError('DUPLICATE_KEY', 'An account with this email already exists.', 409, { email: 'Email already registered' });
-      const code = nextNo('CL', 'C-', 5);
-      const ae = 'AE.JREYES';
-      db.clients.unshift({
-        clientCode: code, clientName: f.clientName, billingName: f.clientName, address1: f.address1, country: 'PHILIPPINES', billingCycle: 'Weekly', aeAssigned: ae, branchCode: f.branchCode,
-        status: 'Draft', allowLt: false, allowSt: false, allowOnline: false, allowSpecial: false, allowRescue: false, cwsBranchAccess: [f.branchCode], isLegal: false, isCollectionAgency: false,
-        registrationSource: 'Portal', createdAt: nowIso(), contacts: [{ id: uid(), firstName: f.firstName, lastName: f.lastName, phone: f.phone, email: f.email, isPrimary: true }],
-      });
-      db.users.push({ userId: f.email, name: `${f.firstName} ${f.lastName}`, designation: `Client — ${f.clientName}`, status: 'Inactive', realm: 'CLIENT_PORTAL', clientCode: code, branchCode: f.branchCode, branchAccess: [], email: f.email, roles: ['CLIENT'], password: f.password, failed: 0 });
-      notify('client.portal_registered', `New portal registration: ${f.clientName}`, 'Review and approve with one click, then submit for accreditation (DBL-CLT-019).', { aeUserId: ae, link: `/clients/${code}` });
-      audit('client.portal_registered', 'client', code, { clientName: f.clientName });
-      persist();
-      return { clientCode: code };
-    },
+    /** Portal "Request portal access" for a client or a vendor: TIN, contact, branch, supporting documents; one email = one company (see ./portalAuth.ts). */
+    async registerPortal(f: ClientPortalForm) { return requestPortalAccess(f); },
     async update(code: string, patch: Partial<Client>) {
       requirePerm('clients.client', 'edit');
       return tx(() => {
@@ -1289,7 +1362,7 @@ export const api = {
       });
     },
     async availability(branchCode: string) {
-      return tx(() => Object.fromEntries(db.equipmentTypes.map((t) => [t.code, db.chassis.filter((c) => c.branchCode === branchCode && c.chassisType === t.code && c.status === 'Available').length])) as Record<string, number>);
+      return tx(() => Object.fromEntries(db.equipmentTypes.map((t) => [t.code, availableUnits(branchCode, t.code)])) as Record<string, number>);
     },
     async createEwa(f: EwaForm) {
       const u = me();
@@ -1298,20 +1371,62 @@ export const api = {
       await delay(200);
       assertGate(clientCode, u.realm === 'CLIENT_PORTAL' ? 'PORTAL_EWA' : 'EWA_CREATE');
       const c = mustClient(clientCode);
+      // Portal New EWA review: the Screen Inventory error "Missing driver/truck info" when any driver / truck field is blank.
+      const clean = { driverName: f.driverName?.trim() ?? '', driverLicenseNo: f.driverLicenseNo?.trim().toUpperCase() ?? '', truckPlateNo: f.truckPlateNo?.trim().toUpperCase().replace(/\s+/g, ' ') ?? '', trucker: f.trucker?.trim() ?? '' };
+      const blank = Object.fromEntries(Object.entries(clean).filter(([, v]) => !v).map(([k]) => [k, 'Required']));
+      if (Object.keys(blank).length) throw new ApiError('MISSING_DRIVER_TRUCK_INFO', 'Missing driver/truck info: enter the trucker, truck plate no., driver name and driver licence no.', 422, blank);
+      const fmt: Record<string, string> = {};
+      if (!PLATE_RE.test(clean.truckPlateNo)) fmt.truckPlateNo = 'Use the LTO format, e.g. NAB 5678';
+      if (!LICENCE_RE.test(clean.driverLicenseNo)) fmt.driverLicenseNo = 'Use the LTO format, e.g. N01-23-456789';
+      if (Object.keys(fmt).length) throw new ApiError('VALIDATION_FAILED', 'Check the truck plate and driver licence format.', 422, fmt);
       const ct = db.contracts.find((x) => x.contractNo === f.contractNo && x.clientCode === clientCode && x.status === 'Active');
       if (!ct) throw new ApiError('VALIDATION_FAILED', 'Select an active contract for this client.', 422, { contractNo: 'No active contract' });
+      const branch = db.branches.find((b) => b.code === f.branchCode);
+      if (!branch || branch.isHeadOffice || branch.active === false) throw new ApiError('VALIDATION_FAILED', 'Choose a pickup branch.', 422, { branchCode: 'Not a pickup branch' });
       if (u.realm === 'CLIENT_PORTAL' && !c.cwsBranchAccess.includes(f.branchCode)) throw new ApiError('ELIGIBILITY', 'Pickup branch is not in your CWS branch access.', 409, { branchCode: 'Branch not allowed' });
+      if (!f.units?.length) throw new ApiError('VALIDATION_FAILED', 'Add at least one equipment type.', 422, { units: 'Required' });
+      if (new Set(f.units.map((l) => l.equipmentType)).size !== f.units.length) throw new ApiError('VALIDATION_FAILED', 'Each equipment type can appear once — change its quantity instead.', 422, { units: 'Duplicate type' });
+      // Limited by the free units at the pickup branch and by what is left on the contract (entitlement), per type and in total.
+      const ent = ewaEntitlement(ct);
       for (const line of f.units) {
-        const avail = db.chassis.filter((x) => x.branchCode === f.branchCode && x.chassisType === line.equipmentType && x.status === 'Available').length;
-        if (line.qty > avail) throw new ApiError('VALIDATION_FAILED', `Only ${avail} unit(s) of ${db.equipmentTypes.find((e) => e.code === line.equipmentType)?.name} available at ${f.branchCode}.`, 422);
+        const name = db.equipmentTypes.find((e) => e.code === line.equipmentType)?.name ?? line.equipmentType;
+        const t = ent.types.find((x) => x.equipmentType === line.equipmentType);
+        if (!t) throw new ApiError('VALIDATION_FAILED', `${name} is not on contract ${ct.contractNo}.`, 422, { units: 'Not on contract' });
+        if (!Number.isInteger(line.qty) || line.qty < 1) throw new ApiError('VALIDATION_FAILED', 'Quantity must be a whole number of at least 1.', 422, { units: 'Whole number, at least 1' });
+        const avail = availableUnits(f.branchCode, line.equipmentType);
+        if (line.qty > avail) throw new ApiError('VALIDATION_FAILED', `Only ${avail} unit(s) of ${name} available at ${f.branchCode}.`, 422, { units: `Only ${avail} available` });
+        if (line.qty > t.remaining) throw new ApiError('ENTITLEMENT_EXCEEDED', `Contract ${ct.contractNo} allows ${t.remaining} more ${name} unit(s) (${t.entitled != null ? `${t.entitled} entitled, ` : ''}${t.onHire} on hire, ${t.pending} on open EWAs).`, 422, { units: `${t.remaining} left on the contract` });
       }
+      const total = f.units.reduce((a, l) => a + l.qty, 0);
+      if (total > ent.contractRemaining) throw new ApiError('ENTITLEMENT_EXCEEDED', `Contract ${ct.contractNo} covers ${ent.unitQty} units; ${ent.onHire} are on hire and ${ent.pending} are on open EWAs, so ${ent.contractRemaining} more can be requested.`, 422, { units: `${ent.contractRemaining} left on the contract` });
+      const validUntil = addHours(nowIso(), Number(S()['gat.ewa_validity_hours'] ?? 24));
+      if (f.expectedPickupAt && (Number.isNaN(Date.parse(f.expectedPickupAt)) || f.expectedPickupAt > validUntil || Date.parse(f.expectedPickupAt) < Date.now() - 3_600_000)) throw new ApiError('VALIDATION_FAILED', 'The expected pickup must fall within the EWA validity.', 422, { expectedPickupAt: 'Within the next 24 hours' });
+      if ((f.remarks?.length ?? 0) > 300) throw new ApiError('VALIDATION_FAILED', 'Remarks are limited to 300 characters.', 422, { remarks: 'Max 300 characters' });
       const euNo = nextNo('EU', 'EU-', 6);
-      const e = { euNo, clientCode, contractNo: f.contractNo, branchCode: f.branchCode, driverName: f.driverName, driverLicenseNo: f.driverLicenseNo, truckPlateNo: f.truckPlateNo, trucker: f.trucker,
-        units: f.units.map((l) => ({ ...l, usedChassis: [] })), createdAt: nowIso(), validUntil: addHours(nowIso(), Number(S()['gat.ewa_validity_hours'] ?? 24)), createdVia: (u.realm === 'CLIENT_PORTAL' ? 'Portal' : 'Internal') as 'Portal' | 'Internal', status: 'Active' as const, extensionCount: 0, createdBy: u.userId };
+      const e: Ewa = { euNo, clientCode, contractNo: f.contractNo, branchCode: f.branchCode, ...clean,
+        units: f.units.map((l) => ({ ...l, usedChassis: [] })), createdAt: nowIso(), validUntil, createdVia: (u.realm === 'CLIENT_PORTAL' ? 'Portal' : 'Internal') as 'Portal' | 'Internal', status: 'Active' as const, extensionCount: 0, createdBy: u.userId,
+        truckOrcr: f.truckOrcr?.trim() || undefined, expectedPickupAt: f.expectedPickupAt || undefined, remarks: f.remarks?.trim() || undefined };
+      e.delivery = ewaDelivery(e, c);
       db.ewas.unshift(e);
-      notify('ewa.created', `EWA ${euNo} created — ${c.clientName}`, `Branch ${f.branchCode} · driver ${f.driverName} · truck ${f.truckPlateNo} · valid until ${new Date(e.validUntil).toLocaleString('en-PH')}`, { branchCode: f.branchCode, clientCode, aeUserId: c.aeAssigned, link: `/gate/ewa` });
+      notify('ewa.created', `EWA ${euNo} created — ${c.clientName}`, `Branch ${f.branchCode} · driver ${clean.driverName} · truck ${clean.truckPlateNo} · valid until ${new Date(e.validUntil).toLocaleString('en-PH')}`, { branchCode: f.branchCode, clientCode, aeUserId: c.aeAssigned, link: `/gate/ewa` });
+      // The client's own portal users get an in-app notice that opens the EWA (GAT-002).
+      notify('ewa.created.portal', `EWA ${euNo} created`, `${f.branchCode} · ${clean.driverName} · ${clean.truckPlateNo} · valid until ${formatDateTime(e.validUntil)}`, { extraUsers: db.users.filter((x) => x.realm === 'CLIENT_PORTAL' && x.clientCode === clientCode && x.status === 'Active').map((x) => x.userId), link: `/client/ewa?open=${euNo}` });
       audit('ewa.created', 'ewa', euNo, e); persist();
       return structuredClone(e);
+    },
+    /** Portal New EWA review (GAT-002): send the full-detail EWA email again to the same recipients; each send is logged with its status. */
+    async resendEwaEmail(euNo: string) {
+      const u = me();
+      await delay();
+      return tx(() => {
+        const e = db.ewas.find((x) => x.euNo === euNo && (u.realm !== 'CLIENT_PORTAL' || x.clientCode === u.clientCode));
+        if (!e) throw new ApiError('NOT_FOUND', 'EWA not found.', 404);
+        if (e.status !== 'Active' && e.status !== 'Partially Used') throw new ApiError('INVALID_STATE', `${euNo} is ${e.status.toLowerCase()} — there is nothing to resend.`, 409);
+        const sent = ewaDelivery(e, mustClient(e.clientCode), true);
+        (e.delivery ??= []).push(...sent);
+        audit('ewa.email_resent', 'ewa', euNo, { recipients: sent.map((d) => d.to) });
+        return sent;
+      });
     },
     async requestExtension(euNo: string, reason: string) {
       await delay();
@@ -1367,7 +1482,7 @@ export const api = {
       if (!input.signature) throw new ApiError('VALIDATION_FAILED', 'Driver signature is required.', 422, { signature: 'Signature required' });
       if (!input.truckOrcr?.trim()) throw new ApiError('VALIDATION_FAILED', 'Truck OR/CR (vehicle registration) must be verified and recorded (DBL-GAT-004).', 422, { truckOrcr: 'Required' });
       if (input.generalAssessment === 'Unroadworthy') throw new ApiError('VALIDATION_FAILED', 'Unroadworthy units cannot be released.', 422);
-      const gpNo = nextNo('GP', `GP-${c.branchCode}-`, 6); const eirNo = nextNo('EIR', `EIR-${c.branchCode}-`, 6);
+      const gpNo = gatePassNo(c.branchCode); const eirNo = nextNo('EIR', `EIR-${c.branchCode}-`, 6);
       if (input.credentialMismatch?.length) audit('gate.out.credential_override', 'ewa', e.euNo, { driverName: input.driverName, driverLicenseNo: input.driverLicenseNo, truckPlateNo: input.truckPlateNo, gatePassNo: gpNo }, `Differs from EWA: ${input.credentialMismatch.join(', ')}`, { driverName: e.driverName, driverLicenseNo: e.driverLicenseNo, truckPlateNo: e.truckPlateNo });
       const actual = input.actualEventAt ?? nowIso();
       db.gatePasses.unshift({ gatePassNo: gpNo, direction: 'OUT', chassisNo: c.chassisNo, clientCode: e.clientCode, contractNo: e.contractNo, euNo: e.euNo, trucker: input.trucker, truckPlateNo: input.truckPlateNo, truckOrcr: input.truckOrcr,
@@ -1410,7 +1525,7 @@ export const api = {
       if (!input.inspection.length) throw new ApiError('VALIDATION_FAILED', 'Record the parts inspection before finalising.', 422);
       if (!input.signature) throw new ApiError('VALIDATION_FAILED', 'Driver signature is required on the inbound EIR (DBL-GAT-006).', 422, { signature: 'Signature required' });
       if (input.generalAssessment === 'Unroadworthy' && !input.categories?.length) throw new ApiError('VALIDATION_FAILED', 'Select at least one repair system for an Unroadworthy return (DBL-GAT-013).', 422, { categories: 'Required' });
-      const gpNo = nextNo('GP', `GP-${input.returnBranchCode}-`, 6);
+      const gpNo = gatePassNo(input.returnBranchCode);
       const actual = input.actualEventAt ?? nowIso();
       const eir = db.eirs.find((x) => x.gatePassOutNo === out.gatePassNo);
       db.gatePasses.unshift({ gatePassNo: gpNo, direction: 'IN', chassisNo: c.chassisNo, clientCode: out.clientCode, contractNo: out.contractNo, trucker: out.trucker, truckPlateNo: input.truckPlateNo, driverName: input.driverName, driverLicenseNo: input.driverLicenseNo,
@@ -3168,22 +3283,95 @@ export const api = {
         const active = contracts.filter((x) => x.status === 'Active');
         const ae = db.users.find((x) => x.userId === c.aeAssigned);
         const newest = <T extends { at?: string; createdAt?: string; requestedAt?: string }>(a: T, b: T) => (b.at ?? b.createdAt ?? b.requestedAt ?? '').localeCompare(a.at ?? a.createdAt ?? a.requestedAt ?? '');
+        // ── Portal dashboard review (2026-11-11) ──
+        const rateOf = (contractNo?: string, eq?: string) => db.contracts.find((x) => x.contractNo === contractNo)?.rates.find((r) => r.equipmentType === eq)?.dailyRate;
+        const typeOf = (chassisNo: string) => db.chassis.find((x) => x.chassisNo === chassisNo)?.chassisType;
+        const openReturn = (chassisNo: string) => (db.returnRequests ?? []).find((r) => r.clientCode === code && r.chassisNo === chassisNo && (r.status === 'Requested' || r.status === 'Scheduled'));
+        // Overdue amount and the six aging buckets (same calculation as Aging / SOA).
+        const overdueInvs = unpaid.filter((i) => paymentStatus(i) === 'Overdue');
+        // Cash bond: what could be withdrawn today (BR-14), so the dashboard link is only offered when something is refundable.
+        const heldBonds = db.cashBonds.filter((b) => b.clientCode === code && (b.status === 'Held' || b.status === 'Withdrawal Pending'));
+        const bondPreviews = heldBonds.map((b) => ({ status: b.status, ...api.contracts.refundPreview(b.id) }));
+        // Repair and debit-memo charges, with the source document and how each one was settled.
+        const charges = [
+          ...db.memos.filter((m) => m.clientCode === code && m.type === 'Debit' && !['Draft', 'Rejected'].includes(m.status)).map((m) => {
+            const src = m.rescueNo ?? m.joNo ?? m.referenceId;
+            const txn = db.ewalletTxns.find((t) => t.clientCode === code && t.type === 'Deduction' && !t.reversedById && (t.referenceId === m.memoNo || (!!src && t.referenceId === src)));
+            const kind = m.referenceType === 'Rescue' ? 'Rescue' : m.referenceType === 'Job Order' || m.referenceType === 'Repair' ? 'Repair' : m.referenceType === 'Park & Fix' ? 'Park & Fix' : m.category ?? m.referenceType;
+            return {
+              ref: m.memoNo, docType: 'Debit memo' as const, kind, reason: m.reason, amount: m.amount, at: m.createdAt, status: m.status,
+              source: src ? `${m.referenceType} ${src}` : m.referenceType, invoiceNo: m.referenceInvoiceNo,
+              settlement: txn ? { how: 'ewallet' as const, txnId: txn.id, at: txn.at, balanceAfter: txn.balanceAfter }
+                : m.status === 'Pending Approval' ? { how: 'pending' as const }
+                  : m.status === 'Applied' && m.appliedTo ? { how: 'invoice' as const, invoiceNo: m.appliedTo }
+                    : { how: 'open' as const },
+            };
+          }),
+          // One-off repair / damage bills (e.g. chargeable damage found at Gate In) are invoiced rather than memoed.
+          ...invs.filter((i) => i.billType === 'Repair' && i.status !== 'Cancelled').map((i) => ({
+            ref: i.invoiceNo, docType: 'Repair invoice' as const, kind: 'Repair', reason: i.lines.map((l) => l.description).join('; '), amount: i.total, at: i.issuedAt, status: paymentStatus(i),
+            source: i.lines.find((l) => l.chassisNo)?.chassisNo ? `Chassis ${i.lines.find((l) => l.chassisNo)!.chassisNo}` : 'Gate In inspection', invoiceNo: i.invoiceNo,
+            settlement: balance(i) > 0 ? { how: 'invoice_due' as const, invoiceNo: i.invoiceNo, balance: balance(i), dueDate: i.dueDate } : { how: 'paid' as const, invoiceNo: i.invoiceNo },
+          })),
+        ].sort((a, b) => b.at.localeCompare(a.at));
+        const notes = db.notifications.filter((n) => n.userId === u.userId);
         return {
+          aging: agingFor(code), overdueCount: overdueInvs.length,
+          oldestOverdueDays: overdueInvs.length ? Math.max(...overdueInvs.map(daysOverdue)) : 0,
+          cashBond: {
+            held: round2(bondPreviews.reduce((a, b) => a + b.bond, 0)),
+            refundable: round2(bondPreviews.filter((b) => b.status === 'Held').reduce((a, b) => a + b.refundable, 0)),
+            unpaid: bondPreviews[0]?.unpaid ?? 0, negativeWallet: bondPreviews[0]?.negativeWallet ?? 0, openDm: bondPreviews[0]?.openDm ?? 0,
+            withdrawalPending: bondPreviews.some((b) => b.status === 'Withdrawal Pending'),
+          },
+          charges, unreadNotifications: notes.filter((n) => !n.read).length,
           client: c, unpaidCount: unpaid.length, unpaidTotal: round2(unpaid.reduce((a, i) => a + balance(i), 0)), oldestDue,
           oldestDueAmount: round2(oldest.reduce((a, i) => a + balance(i), 0)), oldestDueInvoices: oldest.map((i) => i.invoiceNo), oldestDueOverdue: oldest.some((i) => paymentStatus(i) === 'Overdue'),
           overdue: round2(unpaid.filter((i) => paymentStatus(i) === 'Overdue').reduce((a, i) => a + balance(i), 0)),
           // Newest first, with reference and running balance (review 1.1, DBL-EWL-005).
           ewallet: db.ewallets.find((e) => e.clientCode === code) ?? null, walletTxns: db.ewalletTxns.filter((t) => t.clientCode === code).sort(newest).slice(0, 5),
           cashBondHeld: db.cashBonds.filter((b) => b.clientCode === code && (b.status === 'Held' || b.status === 'Withdrawal Pending')).reduce((a, b) => a + b.amount, 0),
-          onHire: db.chassis.filter((x) => x.currentClientCode === code && ['On Hire', 'Rescue'].includes(x.status)).map((x) => ({ chassisNo: x.chassisNo, chassisType: x.chassisType, branchCode: x.branchCode, status: x.status, contractNo: x.currentContractNo, gateOut: db.gatePasses.find((g) => g.gatePassNo === x.currentGatePassNo)?.actualEventAt })),
+          // Dashboard review: contract, daily rate (contract snapshot), hire days (pickup day counts, Q-FIN-02) and the hire charge accrued so far (ex VAT).
+          onHire: db.chassis.filter((x) => x.currentClientCode === code && ['On Hire', 'Rescue'].includes(x.status)).map((x) => {
+            const gateOut = db.gatePasses.find((g) => g.gatePassNo === x.currentGatePassNo)?.actualEventAt;
+            const dailyRate = rateOf(x.currentContractNo, x.chassisType);
+            const days = gateOut ? hireDays(gateOut).billable : undefined;
+            const rr = openReturn(x.chassisNo);
+            return {
+              chassisNo: x.chassisNo, chassisType: x.chassisType, branchCode: x.branchCode, status: x.status, contractNo: x.currentContractNo, gateOut, gatePassNo: x.currentGatePassNo,
+              dailyRate, hireDays: days, accrued: dailyRate != null && days != null ? round2(dailyRate * days) : undefined,
+              returnRequest: rr ? { requestNo: rr.requestNo, preferredDate: rr.preferredDate, returnBranchCode: rr.returnBranchCode, status: rr.status } : undefined,
+              // Proposed (Q-PTL-03): a return can be requested for a unit on hire (not while it is under rescue) with no open request.
+              canRequestReturn: x.status === 'On Hire' && !rr,
+            };
+          }),
           // DBL-CLT-017 equipment return history: Gate In passes for this client, paired with their Gate Out.
+          // Dashboard review: return branch, Gate In date and time, condition, final charges, hire duration and the BR-16 code for a cross-branch return.
           returns: db.gatePasses.filter((g) => g.clientCode === code && g.direction === 'IN').sort((a, b) => b.actualEventAt.localeCompare(a.actualEventAt)).slice(0, 5)
-            .map((g) => ({ chassisNo: g.chassisNo, gatePassNo: g.gatePassNo, returnedAt: g.actualEventAt, branchCode: g.branchCode, hiredAt: db.gatePasses.find((o) => o.gatePassNo === g.pairedGatePassNo)?.actualEventAt, remarks: g.remarks })),
+            .map((g) => {
+              const out = db.gatePasses.find((o) => o.gatePassNo === g.pairedGatePassNo);
+              const chassisType = typeOf(g.chassisNo);
+              const dailyRate = rateOf(g.contractNo, chassisType);
+              const d = out ? hireDays(out.actualEventAt, g.actualEventAt) : undefined;
+              const damage = g.inspection.filter((l) => l.chargeable > 0).map((l) => ({ part: l.part, amount: l.chargeable }));
+              const damageCharge = round2(damage.reduce((a, l) => a + l.amount, 0));
+              const leaseCharge = dailyRate != null && d ? round2(dailyRate * d.billable) : undefined;
+              const originBranchCode = out?.branchCode ?? g.originBranchCode ?? g.branchCode;
+              return {
+                chassisNo: g.chassisNo, chassisType, gatePassNo: g.gatePassNo, outGatePassNo: out?.gatePassNo, eirNo: g.eirNo, returnedAt: g.actualEventAt, branchCode: g.branchCode,
+                hiredAt: out?.actualEventAt, originBranchCode, crossBranch: originBranchCode !== g.branchCode, approvalCode: g.crossBranchCode,
+                condition: g.generalAssessment, remarks: g.remarks, damage, durationDays: d?.calendar, billableDays: d?.billable, dailyRate, leaseCharge, damageCharge,
+                finalCharges: leaseCharge != null ? round2(leaseCharge + damageCharge) : undefined, isForceInbound: !!g.isForceInbound,
+              };
+            }),
+          returnBranches: Array.from(new Set([c.branchCode, ...c.cwsBranchAccess])).map((b) => ({ code: b, name: db.branches.find((x) => x.code === b)?.name ?? b })),
           // DBL-RPT-009 service ticket status: open rescue requests.
           openRescues: db.rescues.filter((r) => r.clientCode === code && rescueIsOpen(r)).sort(newest).map((r) => ({ rescueNo: r.rescueNo, chassisNo: r.chassisNo, status: r.status, requestedAt: r.requestedAt, urgent: r.urgent, eta: r.eta })),
           ewas: db.ewas.filter((e) => e.clientCode === code).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.euNo.localeCompare(a.euNo)).slice(0, 6), contracts,
           activeContracts: { count: active.length, nearestExpiry: active.map((x) => x.expiryDate).filter(Boolean).sort()[0] as string | undefined },
           accountExecutive: ae ? { name: ae.name, email: ae.email, mobile: ae.mobile } : null,
+          // Portal sign-in review (BR-01): who to call about a hold, shown with the restriction message.
+          creditContact: creditContact(),
           gates: { ewa: creditGate(c, 'PORTAL_EWA'), rescue: creditGate(c, 'RESCUE_REQUEST') },
         };
       });
@@ -3194,21 +3382,111 @@ export const api = {
       return tx(() => db.cashBonds.filter((b) => b.clientCode === u.clientCode).map((b) => ({ ...b, preview: api.contracts.refundPreview(b.id), workflows: b.withdrawals.map((w) => db.workflows.find((x) => x.id === w.workflowId)).filter(Boolean) })));
     },
     /** Review 1.1 (DBL-CLT-017): feedback and contract requests from the client; the Account Executive is notified. */
-    async submitFeedback(f: { category: string; subject: string; message: string; reference?: string }) {
+    async submitFeedback(f: { category: string; subject: string; message: string; reference?: string; rating?: number; topic?: string }) {
       const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
       await delay();
-      const missing = { category: f.category?.trim() ? '' : 'Required', subject: f.subject?.trim() ? '' : 'Required', message: f.message?.trim() ? '' : 'Required' };
+      // Dashboard review: a star rating needs no subject or message (the comment is optional).
+      const rated = f.rating != null;
+      if (rated && !(Number.isInteger(f.rating) && f.rating! >= 1 && f.rating! <= 5)) throw new ApiError('VALIDATION_FAILED', 'Choose a rating from 1 to 5 stars.', 422, { rating: 'Choose 1 to 5 stars' });
+      const subject = f.subject?.trim() || (rated ? `${f.rating}-star rating${f.topic ? ` — ${f.topic}` : ''}` : '');
+      const message = f.message?.trim() || (rated ? '(no comment)' : '');
+      const missing = { category: f.category?.trim() ? '' : 'Required', subject: subject ? '' : 'Required', message: message ? '' : 'Required' };
       if (Object.values(missing).some(Boolean)) throw new ApiError('VALIDATION_FAILED', 'Category, subject and message are required.', 422, missing);
       const c = mustClient(u.clientCode!);
-      const fb = { id: `FB-${String((db.feedback?.length ?? 0) + 1).padStart(5, '0')}`, clientCode: c.clientCode, category: f.category.trim(), subject: f.subject.trim(), message: f.message.trim(), reference: f.reference?.trim() || undefined, submittedAt: nowIso(), submittedBy: u.userId, status: 'Submitted' as const };
+      const fb = { id: `FB-${String((db.feedback?.length ?? 0) + 1).padStart(5, '0')}`, clientCode: c.clientCode, category: f.category.trim(), subject, message, reference: f.reference?.trim() || undefined, submittedAt: nowIso(), submittedBy: u.userId, status: 'Submitted' as const,
+        rating: rated ? f.rating : undefined, topic: f.topic?.trim() || undefined };
       (db.feedback ??= []).unshift(fb);
-      notify('client.feedback', `${fb.category} — ${c.clientName}`, `${fb.subject}${fb.reference ? ` (${fb.reference})` : ''}`, { clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: [c.aeAssigned] });
+      notify('client.feedback', `${rated ? `${'★'.repeat(f.rating!)} rating` : fb.category} — ${c.clientName}`, `${fb.subject}${fb.reference ? ` (${fb.reference})` : ''}`, { clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: [c.aeAssigned] });
       audit('client.feedback', 'client', c.clientCode, fb); persist();
       return structuredClone(fb);
     },
     async myFeedback() {
       const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
       return tx(() => (db.feedback ?? []).filter((x) => x.clientCode === u.clientCode));
+    },
+    /**
+     * Dashboard review (proposed — Q-PTL-03): ask Delbros to collect an on-hire unit. The branch and the Account Executive are
+     * notified and arrange the Gate In. Returning at a branch other than the release branch needs the IT-issued approval code (BR-16).
+     */
+    async requestReturn(f: { chassisNo: string; returnBranchCode: string; preferredDate: string; notes?: string }) {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      await delay();
+      return tx(() => {
+        const c = mustClient(u.clientCode!);
+        const ch = db.chassis.find((x) => x.chassisNo === f.chassisNo && x.currentClientCode === c.clientCode);
+        if (!ch) throw new ApiError('NOT_FOUND', 'That unit is not on hire to your account.', 404);
+        if (ch.status !== 'On Hire') throw new ApiError('INVALID_STATE', `${ch.chassisNo} is under ${ch.status.toLowerCase()} — the return is arranged once it is back on hire.`, 409);
+        if ((db.returnRequests ?? []).some((r) => r.chassisNo === ch.chassisNo && (r.status === 'Requested' || r.status === 'Scheduled'))) throw new ApiError('DUPLICATE', `A return is already requested for ${ch.chassisNo}.`, 409);
+        const allowed = new Set([c.branchCode, ...c.cwsBranchAccess, ch.branchCode]);
+        const fields: Record<string, string> = {};
+        if (!allowed.has(f.returnBranchCode)) fields.returnBranchCode = 'Choose one of your branches';
+        const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f.preferredDate ?? '')) fields.preferredDate = 'Required';
+        else if (f.preferredDate < today) fields.preferredDate = 'Cannot be in the past';
+        else if (f.preferredDate > addDays(today, 60).slice(0, 10)) fields.preferredDate = 'Within the next 60 days';
+        if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
+        const origin = db.gatePasses.find((g) => g.gatePassNo === ch.currentGatePassNo)?.branchCode ?? ch.branchCode;
+        const r = { requestNo: nextNo('RTN', 'RTN-', 6), clientCode: c.clientCode, chassisNo: ch.chassisNo, contractNo: ch.currentContractNo, originBranchCode: origin, returnBranchCode: f.returnBranchCode,
+          preferredDate: f.preferredDate, notes: f.notes?.trim() || undefined, status: 'Requested' as const, requestedAt: nowIso(), requestedBy: u.userId };
+        (db.returnRequests ??= []).unshift(r);
+        const cross = origin !== f.returnBranchCode;
+        notify('client.return_request', `Return requested: ${ch.chassisNo}`, `${c.clientName} · ${r.requestNo} · return at ${f.returnBranchCode} on ${f.preferredDate}${cross ? ` — cross-branch from ${origin}, IT approval code needed (BR-16)` : ''}`,
+          { branchCode: f.returnBranchCode, clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: [c.aeAssigned, ...db.users.filter((x) => x.realm === 'INTERNAL' && x.roles.includes('BRANCH_GENERALIST') && x.branchCode === f.returnBranchCode).map((x) => x.userId)] });
+        audit('portal.return_requested', 'chassis', ch.chassisNo, r);
+        return { ...r, crossBranch: cross };
+      });
+    },
+    /**
+     * Portal New EWA review: everything the New EWA dialog needs in one call — whether the client may create an EWA (and why not),
+     * active contracts with what is left to request, eligible pickup branches with free units per type, and drivers / trucks used before.
+     */
+    async ewaOptions() {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      expireEwas();
+      return tx(() => {
+        const c = mustClient(u.clientCode!);
+        const gate = creditGate(c, 'PORTAL_EWA', (db.gateOverrides ?? []).filter((o) => o.clientCode === c.clientCode));
+        const branches = c.cwsBranchAccess.map((code) => db.branches.find((b) => b.code === code)).filter((b): b is NonNullable<typeof b> => !!b && !b.isHeadOffice && b.active !== false);
+        const contracts = db.contracts.filter((x) => x.clientCode === c.clientCode && x.status === 'Active');
+        type Blocked = { code: 'HOLD' | 'NOT_ACCREDITED' | 'ONLINE_OFF' | 'ACCOUNT' | 'NO_BRANCH' | 'NO_CONTRACT'; title: string; reason: string };
+        const blocked: Blocked | null = !gate.allowed
+          ? c.status === 'Hold' ? { code: 'HOLD', title: 'Your account is on hold', reason: 'New EWAs and chassis release are blocked until the overdue balance is settled and the hold is lifted (BR-01).' }
+            : c.status === 'Draft' ? { code: 'NOT_ACCREDITED', title: 'Your company is not yet accredited', reason: 'EWAs can be created once Delbros completes your accreditation.' }
+              : gate.code === 'ELIGIBILITY' ? { code: 'ONLINE_OFF', title: 'Online EWA is not enabled for your account', reason: 'Allow Online is off for your account, so EWAs cannot be created in the portal. Your Account Executive can book the pickup or enable online EWAs.' }
+                : { code: 'ACCOUNT', title: 'EWA creation unavailable', reason: gate.reason ?? 'Your account cannot create EWAs at the moment.' }
+          : !branches.length ? { code: 'NO_BRANCH', title: 'No pickup branch is enabled for your account', reason: 'Your account has no branch set up for chassis pickup (CWS branch access). Ask your Account Executive to add one.' }
+            : !contracts.length ? { code: 'NO_CONTRACT', title: 'No active contract', reason: 'An EWA is issued against an active lease contract. Your Account Executive can help with a new or renewed contract.' }
+              : null;
+        const past = db.ewas.filter((e) => e.clientCode === c.clientCode).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const drivers: { name: string; licence: string; lastUsed: string }[] = [];
+        const trucks: { plate: string; trucker: string; truckOrcr?: string; lastUsed: string }[] = [];
+        for (const e of past) {
+          if (!drivers.some((d) => d.licence === e.driverLicenseNo)) drivers.push({ name: e.driverName, licence: e.driverLicenseNo, lastUsed: e.createdAt });
+          if (!trucks.some((t) => t.plate === e.truckPlateNo)) {
+            const orcr = e.truckOrcr ?? db.gatePasses.find((g) => g.euNo === e.euNo && g.truckOrcr)?.truckOrcr;
+            trucks.push({ plate: e.truckPlateNo, trucker: e.trucker, truckOrcr: orcr, lastUsed: e.createdAt });
+          }
+        }
+        const ae = db.users.find((x) => x.userId === c.aeAssigned);
+        return {
+          blocked, clientName: c.clientName, validityHours: Number(S()['gat.ewa_validity_hours'] ?? 24),
+          contracts: contracts.map((ct) => ({ contractNo: ct.contractNo, contractType: ct.contractType, class: ct.class, expiryDate: ct.expiryDate, entitlement: ewaEntitlement(ct) })),
+          branches: branches.map((b) => ({ code: b.code, name: b.name })),
+          availability: Object.fromEntries(branches.map((b) => [b.code, Object.fromEntries(db.equipmentTypes.map((t) => [t.code, availableUnits(b.code, t.code)]))])) as Record<string, Record<string, number>>,
+          drivers: drivers.slice(0, 20), trucks: trucks.slice(0, 20),
+          accountExecutive: ae ? { role: 'Your Account Executive', name: ae.name, phone: ae.mobile, email: ae.email } : null,
+          creditContact: creditContact(),
+        };
+      });
+    },
+    /** Dashboard review: the client's notifications, each with a link to the record in the portal. */
+    async notifications() {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      return tx(() => db.notifications.filter((n) => n.userId === u.userId).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50).map((n) => ({ ...n, link: portalLink(n.link) })), 50);
+    },
+    async markNotificationsRead(id?: string) {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      return tx(() => { db.notifications.forEach((n) => { if (n.userId === u.userId && (!id || n.id === id)) n.read = true; }); return true; }, 50);
     },
     /** Review 1.1: the client may cancel its own rescue request while it is still Requested (before C&C verification). */
     async cancelRescue(no: string, reason: string) {

@@ -59,4 +59,15 @@ for (const t of targets) {
   writeFileSync(outFile, zip(files));
   const kb = Math.round(statSync(outFile).size / 1024);
   console.log(`✓ ${outFile}  (${files.length} files, ${kb} KB, index.html at root: ${files.some((f) => f.name === 'index.html')})`);
+  // Portal sign-in review: the demo accounts box (shared password, sample client/vendor emails) must never reach production.
+  try {
+    const cfg = JSON.parse(readFileSync(join(dist, 'app-config.json'), 'utf8'));
+    if (cfg.showDemoLogins === true) console.warn('⚠ app-config.json has "showDemoLogins": true — the demo accounts box will show. Set it to false in the deployed app-config.json for production.');
+    // Portal review (production contact details): the support phone / email shown to clients and vendors must be the approved release contacts.
+    const rc = cfg.releaseContacts ?? {};
+    const demo = /demo\.delbros\.local|\+63 917 000 0000|\+63 2 8000 [12]000/;
+    const missing = [['client.phone', rc.client?.phone], ['client.email', rc.client?.email], ['vendor.phone', rc.vendor?.phone], ['vendor.email', rc.vendor?.email], ['dpoEmail', rc.dpoEmail]]
+      .filter(([, v]) => !v || demo.test(String(v))).map(([k]) => k);
+    if (missing.length) console.warn(`⚠ app-config.json "releaseContacts" is missing or still has demo values for: ${missing.join(', ')}. The portal will show the demo support contacts — add the approved release contacts before production.`);
+  } catch { /* no app-config.json in the build — demo box stays hidden */ }
 }

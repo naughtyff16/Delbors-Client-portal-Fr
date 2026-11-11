@@ -152,7 +152,13 @@ export interface Ewa {
   /** DBL-GAT-003: inbound-leg credentials updated by the Branch Generalist (pre-fill Gate In). */
   inbound?: EwaCredentials; updatedAt?: string; updatedBy?: string;
   cancelledAt?: string; cancelledBy?: string; cancelReason?: string;
+  /**
+   * Portal New EWA review (2026-11-11): truck OR/CR entered by the client (optional — the yard still verifies the original at Gate Out),
+   * expected pickup time and remarks, and the delivery log of the full-detail EWA email (GAT-002, notification N08).
+   */
+  truckOrcr?: string; expectedPickupAt?: string; remarks?: string; delivery?: EwaDelivery[];
 }
+export interface EwaDelivery { at: string; channel: 'Email' | 'In-app'; audience: 'Client' | 'Delbros'; recipient: string; to: string; status: 'Sent' | 'Queued' | 'Failed'; resend?: boolean }
 export interface EwaCredentials { trucker: string; driverName: string; driverLicenseNo: string; truckPlateNo: string }
 
 export interface InspectionLine { part: string; branding?: string; threadDepth?: string; statusCode: string; qty: number; chargeable: number }
@@ -212,6 +218,18 @@ export interface RescueRequest {
 export interface ClientFeedback {
   id: string; clientCode: string; category: string; subject: string; message: string; reference?: string;
   submittedAt: string; submittedBy: string; status: 'Submitted' | 'Acknowledged' | 'Closed';
+  /** Portal dashboard review (2026-11-11): 1–5 star rating and the service it is about (optional — plain feedback has neither). */
+  rating?: number; topic?: string;
+}
+/**
+ * Portal dashboard review (2026-11-11): the client asks Delbros to collect an on-hire unit (proposed — Q-PTL-03:
+ * whether clients may request returns online). The branch arranges the Gate In; a return at another branch still
+ * needs the IT-issued cross-branch approval code at the gate (BR-16).
+ */
+export interface ReturnRequest {
+  requestNo: string; clientCode: string; chassisNo: string; contractNo?: string; originBranchCode: string; returnBranchCode: string;
+  preferredDate: string; notes?: string; status: 'Requested' | 'Scheduled' | 'Completed' | 'Cancelled';
+  requestedAt: string; requestedBy: string;
 }
 export interface RescueCostLine { kind: 'Tire' | 'Part'; partCode: string; description: string; qty: number; unitPrice: number }
 

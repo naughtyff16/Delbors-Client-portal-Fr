@@ -2,7 +2,7 @@
 // development and UI review — they are NOT Delbros master data. Equipment types in particular are not named
 // in the BRD or design brief (Q-CLT-01) and must be replaced from the DelWater Online extract.
 import {
-  DEFAULT_SETTINGS, addDays, addHours, manilaDay,
+  DEFAULT_SETTINGS, addDays, addHours, formatDate, formatPhp, manilaDay,
   type Branch, type Chassis, type Client, type Contract, type EquipmentType, type Invoice, type NotificationRule,
   type Registration, type RoleCode, type User, type WorkflowInstance, type ChassisStatus, type Part,
 } from '../shared';
@@ -14,12 +14,13 @@ const ahead = (d: number) => addDays(now(), d);
 
 export function buildSeed(): Db {
   const branches: Branch[] = [
-    { code: 'HO', name: 'Head Office', region: 'NCR', gatePassPrefix: 'GP-HO-', isHeadOffice: true },
+    // Gate pass numbers follow the FRS format (GEN0001 / CEB0001): branch prefix + 4 digits (gat.gatepass_seq_digits, Q-GAT-07). Portal dashboard review 2026-11-11.
+    { code: 'HO', name: 'Head Office', region: 'NCR', gatePassPrefix: 'HO', isHeadOffice: true },
     ...[
       ['MNL', 'Manila Yard', 'NCR'], ['NVL', 'Navotas Depot', 'NCR'], ['CAV', 'Cavite Depot', 'South Luzon'], ['LAG', 'Laguna Depot', 'South Luzon'],
       ['BTG', 'Batangas Depot', 'South Luzon'], ['SUB', 'Subic Depot', 'North Luzon'], ['CLK', 'Clark Depot', 'North Luzon'],
       ['CEB', 'Cebu Depot', 'Visayas'], ['CDO', 'Cagayan de Oro Depot', 'Mindanao'], ['DVO', 'Davao Depot', 'Mindanao'],
-    ].map(([code, name, region]) => ({ code, name: `${name}`, region, gatePassPrefix: `GP-${code}-`, isHeadOffice: false })),
+    ].map(([code, name, region]) => ({ code, name: `${name}`, region, gatePassPrefix: code, isHeadOffice: false })),
   ];
   const opsBranches = branches.filter((b) => !b.isHeadOffice).map((b) => b.code);
 
@@ -63,7 +64,17 @@ export function buildSeed(): Db {
     { ...mk('client@pacificmovers.ph', 'Leo Navarro', 'Client — Pacific Movers', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00188', branchAccess: [] },
     { ...mk('tess@islandlink.ph', 'Tess Uy', 'Client — Islandlink Cargo', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00251', branchAccess: [], status: 'Inactive' as const }, // portal self-registration awaiting AE approval (DBL-CLT-019)
     { ...mk('vendor@tirepro.ph', 'Tire Pro Supply', 'Vendor', ['VENDOR']), realm: 'VENDOR_PORTAL', vendorId: 'V-001', branchAccess: [] },
+    // Portal sign-in review (2026-11-11): one demo account per sign-in state. Email is the sign-in ID for every portal user.
+    { ...mk('ops@southernhaulers.ph', 'Joel Ramos', 'Client — Southern Haulers', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00215', branchAccess: [] }, // Allow Online = No → signs in, EWA blocked
+    { ...mk('rico@northstar.ph', 'Rico Dela Paz', 'Client — Northstar Trucking', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00244', branchAccess: [] }, // company still in accreditation → not accredited
+    { ...mk('dispatch@visayasfreight.ph', 'Ana Lopez', 'Client — Visayas Freight', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00201', branchAccess: [], failed: 5, lockedUntil: addDays(now(), 30) }, // locked after 5 failed attempts
+    { ...mk('j.cruz@abclogistics.ph', 'Jun Cruz', 'Client — ABC Logistics (left the company)', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00123', branchAccess: [], status: 'Inactive' as const }, // deactivated portal user
+    { ...mk('sales@luzonbrake.ph', 'Luzon Brake & Axle Trading', 'Vendor', ['VENDOR']), realm: 'VENDOR_PORTAL', vendorId: 'V-005', branchAccess: [] }, // vendor accreditation pending
+    { ...mk('orders@metropaint.ph', 'Metro Paint Supply', 'Vendor', ['VENDOR']), realm: 'VENDOR_PORTAL', vendorId: 'V-004', branchAccess: [] }, // vendor deactivated by APS
   ];
+
+  // Portal users sign in with their email: the user ID and the email are the same address (one email = one company).
+  for (const u of users) if (u.realm !== 'INTERNAL') u.email = u.userId;
 
   const contact = (id: string, f: string, l: string) => ({ id, firstName: f, lastName: l, phone: '+63 917 555 0101', email: `${f.toLowerCase()}@example.ph`, isPrimary: true, isSignatory: true });
   const client = (c: Partial<Client> & Pick<Client, 'clientCode' | 'clientName' | 'status'>): Client => ({
@@ -73,10 +84,10 @@ export function buildSeed(): Db {
     email: 'accounts@example.ph', ebillingEmail: 'billing@example.ph', phone: '(02) 8123 4567', creditLimit: 1500000, createdAt: ago(400), ...c,
   });
   const clients: Client[] = [
-    client({ clientCode: 'C-00123', clientName: 'ABC Logistics Inc.', status: 'Active', qbName: 'ABC LOGISTICS' }),
+    client({ clientCode: 'C-00123', clientName: 'ABC Logistics Inc.', status: 'Active', qbName: 'ABC LOGISTICS', tin: '201-555-123-000' }),
     client({ clientCode: 'C-00188', clientName: 'Pacific Movers Corp.', status: 'Hold', billingCycle: 'Monthly', contacts: [contact('C-00188-1', 'Leo', 'Navarro')] }),
     client({ clientCode: 'C-00201', clientName: 'Visayas Freight Services', status: 'Active', branchCode: 'CEB', cwsBranchAccess: ['CEB'], contacts: [contact('C-00201-1', 'Ana', 'Lopez')] }),
-    client({ clientCode: 'C-00215', clientName: 'Southern Haulers Co.', status: 'Active', branchCode: 'BTG', allowRescue: false, billingCycle: 'Monthly' }),
+    client({ clientCode: 'C-00215', clientName: 'Southern Haulers Co.', status: 'Active', branchCode: 'BTG', allowRescue: false, allowOnline: false, billingCycle: 'Monthly' }), // Allow Online = No (portal sign-in review)
     client({ clientCode: 'C-00230', clientName: 'Metro Container Lines', status: 'Active', allowSpecial: true }),
     client({ clientCode: 'C-00244', clientName: 'Northstar Trucking', status: 'Draft', createdAt: ago(16), contacts: [contact('C-00244-1', 'Rico', 'Dela Paz')] }),
     client({ clientCode: 'C-00251', clientName: 'Islandlink Cargo', status: 'Draft', registrationSource: 'Portal', createdAt: ago(1), contacts: [contact('C-00251-1', 'Tess', 'Uy')] }),
@@ -125,13 +136,16 @@ export function buildSeed(): Db {
   // Demo driver signature (as captured on the gate tablet) so printed EIRs show the signature image.
   const DEMO_SIGNATURE = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="60" viewBox="0 0 220 60"><path d="M8 42c14-26 22-30 26-18s-4 22 6 10 16-28 22-14-6 20 8 8 14-18 24-8 4 12 16 4 18-16 30-6 10 10 22 2 16-8 30-4" fill="none" stroke="#0f172a" stroke-width="2.2" stroke-linecap="round"/></svg>')}`;
   const gatePasses: Db['gatePasses'] = [];
+  const crossBranch: Db['crossBranchCodes'] = [];
   const eirs: Db['eirs'] = [];
   const histEwas: Db['ewas'] = []; // gate (SCR-15/17 review): every seeded release carries the EWA it left under
   // Review 1.1: different drivers per release (not one driver on every row).
   const DRIVERS = [['Juan Dela Cruz', 'N01-23-456789'], ['Mario Reyes', 'N02-15-334455'], ['Ramil Santos', 'N04-18-998877'], ['Arnel Bautista', 'N03-20-112233']] as const;
+  const checklist = (damaged: Record<string, number> = {}) => ['Tire L1 outer', 'Tire L1 inner', 'Tire R1 outer', 'Tire R1 inner', 'Tire L2 outer', 'Tire L2 inner', 'Tire R2 outer', 'Tire R2 inner', 'Brake system', 'Landing legs', 'King pin', 'Twist locks', 'Lights & wiring', 'Mud flaps', 'Chassis frame']
+    .map((part) => ({ part, statusCode: damaged[part] != null ? 'DMG' : 'OK', qty: 1, chargeable: damaged[part] ?? 0 }));
   onHire.forEach((c, i) => {
     const cl = hireClients[i % hireClients.length];
-    const gp = `GP-${c.branchCode}-${String(900 + i).padStart(6, '0')}`;
+    const gp = `${c.branchCode}${String(900 + i).padStart(4, '0')}`; // FRS gate-pass format, e.g. MNL0900
     const eir = `EIR-${c.branchCode}-${String(200 + i).padStart(6, '0')}`;
     const euNo = `EU-TMP-${i}`; // renumbered by creation date below
     const [driverName, driverLicenseNo] = DRIVERS[i % DRIVERS.length];
@@ -142,7 +156,7 @@ export function buildSeed(): Db {
       gatePassNo: gp, direction: 'OUT', chassisNo: c.chassisNo, clientCode: cl, contractNo: hireContracts[cl], trucker: 'XYZ Trucking', truckPlateNo: `NAB ${5600 + i}`, truckOrcr: `OR ${4100200 + i} / CR ${5200300 + i}`, euNo,
       driverName, driverLicenseNo, generalAssessment: 'Roadworthy', actualEventAt: c.statusSince, encodedAt: c.statusSince, signature: DEMO_SIGNATURE,
       // Seeded releases carry the standard GP2 checklist (all OK) so EIR reprints show the recorded condition.
-      inspection: ['Tire L1 outer', 'Tire L1 inner', 'Tire R1 outer', 'Tire R1 inner', 'Tire L2 outer', 'Tire L2 inner', 'Tire R2 outer', 'Tire R2 inner', 'Brake system', 'Landing legs', 'King pin', 'Twist locks', 'Lights & wiring', 'Mud flaps', 'Chassis frame'].map((part) => ({ part, statusCode: 'OK', qty: 1, chargeable: 0 })),
+      inspection: checklist(),
       branchCode: c.branchCode, eirNo: eir, encodedBy: 'BG.MNL',
     });
     eirs.push({ eirNo: eir, gatePassOutNo: gp, clientCode: cl, chassisNo: c.chassisNo, chassisType: c.chassisType, eirOutDate: c.statusSince, depotCode: c.branchCode, contractNo: hireContracts[cl], reprintCount: 0 });
@@ -155,15 +169,30 @@ export function buildSeed(): Db {
         generalAssessment: 'Roadworthy' as const, signature: DEMO_SIGNATURE, branchCode: 'MNL', encodedBy: 'BG.MNL', inspection: [] };
       histEwas.push({ euNo: 'EU-TMP-R', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'MNL', driverName: 'Mario Reyes', driverLicenseNo: 'N02-15-334455', truckPlateNo: 'NAB 5590', trucker: 'XYZ Trucking',
         units: [{ equipmentType: ret.chassisType, qty: 1, usedChassis: [ret.chassisNo] }], createdAt: addHours(outAt, -2), validUntil: addHours(outAt, 22), createdVia: 'Portal', status: 'Used', extensionCount: 0, createdBy: 'client@abclogistics.ph' });
-      gatePasses.push({ ...base, gatePassNo: 'GP-MNL-000880', direction: 'OUT', euNo: 'EU-TMP-R', truckOrcr: 'OR 4100190 / CR 5200290', actualEventAt: outAt, encodedAt: outAt, eirNo: 'EIR-MNL-000180', pairedGatePassNo: 'GP-MNL-000881' },
-        { ...base, gatePassNo: 'GP-MNL-000881', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, eirNo: 'EIR-MNL-000181', pairedGatePassNo: 'GP-MNL-000880', remarks: 'Returned in good condition' });
+      gatePasses.push({ ...base, gatePassNo: 'MNL0880', direction: 'OUT', euNo: 'EU-TMP-R', truckOrcr: 'OR 4100190 / CR 5200290', actualEventAt: outAt, encodedAt: outAt, eirNo: 'EIR-MNL-000180', pairedGatePassNo: 'MNL0881', inspection: checklist() },
+        { ...base, gatePassNo: 'MNL0881', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, eirNo: 'EIR-MNL-000181', pairedGatePassNo: 'MNL0880', originBranchCode: 'MNL', remarks: 'Returned in good condition', inspection: checklist() });
+    }
+    // Portal dashboard review (BR-16): an ABC unit hired out at Cavite and returned at Manila with the IT-issued cross-branch approval code.
+    // A cracked tail lamp was found at Gate In — chargeable ₱950 on the inbound EIR. It is the oldest release, so it keeps EU-000599 and the other EU numbers do not move.
+    const xb = chassis.find((c) => c.branchCode === 'CAV' && c.status === 'Available');
+    if (xb) {
+      const outAt = ago(80), inAt = addHours(ago(44), 2.5), base = { chassisNo: xb.chassisNo, clientCode: 'C-00123', contractNo: 'LTL-2026-0045', trucker: 'XYZ Trucking', truckPlateNo: 'NAB 5601', driverName: 'Arnel Bautista', driverLicenseNo: 'N03-20-112233',
+        generalAssessment: 'Roadworthy' as const, signature: DEMO_SIGNATURE, encodedBy: 'BG.MNL' };
+      histEwas.push({ euNo: 'EU-000599', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'CAV', driverName: 'Arnel Bautista', driverLicenseNo: 'N03-20-112233', truckPlateNo: 'NAB 5601', trucker: 'XYZ Trucking',
+        units: [{ equipmentType: xb.chassisType, qty: 1, usedChassis: [xb.chassisNo] }], createdAt: addHours(outAt, -2), validUntil: addHours(outAt, 22), createdVia: 'Portal', status: 'Used', extensionCount: 0, createdBy: 'client@abclogistics.ph' });
+      gatePasses.push({ ...base, gatePassNo: 'CAV0871', direction: 'OUT', euNo: 'EU-000599', truckOrcr: 'OR 4100195 / CR 5200295', actualEventAt: outAt, encodedAt: outAt, branchCode: 'CAV', eirNo: 'EIR-CAV-000214', pairedGatePassNo: 'MNL0884', inspection: checklist() },
+        { ...base, gatePassNo: 'MNL0884', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, branchCode: 'MNL', originBranchCode: 'CAV', crossBranchCode: 'XB-7Q4K2M', eirNo: 'EIR-CAV-000214', pairedGatePassNo: 'CAV0871',
+          remarks: 'Left tail lamp cracked — chargeable on the inbound EIR', inspection: checklist({ 'Lights & wiring': 950 }) });
+      eirs.push({ eirNo: 'EIR-CAV-000214', gatePassOutNo: 'CAV0871', gatePassInNo: 'MNL0884', clientCode: 'C-00123', chassisNo: xb.chassisNo, chassisType: xb.chassisType, eirOutDate: outAt, eirInDate: inAt, depotCode: 'CAV', contractNo: 'LTL-2026-0045', reprintCount: 0 });
+      xb.branchCode = 'MNL'; xb.statusSince = inAt; // the unit now sits at the return branch
+      crossBranch.push({ code: 'XB-7Q4K2M', chassisNo: xb.chassisNo, toBranch: 'MNL', used: true, expiresAt: addHours(ago(45), 72) });
     }
   }
   // Review 1.1: EU numbers follow creation dates (oldest = EU-000600). The fixed recent EWAs (EU-000765 … EU-000781) are all newer.
   {
     const renum: Record<string, string> = {};
-    [...histEwas].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).forEach((e, k) => { renum[e.euNo] = `EU-${String(600 + k).padStart(6, '0')}`; });
-    histEwas.forEach((e) => { e.euNo = renum[e.euNo]; });
+    [...histEwas].filter((e) => e.euNo.startsWith('EU-TMP-')).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).forEach((e, k) => { renum[e.euNo] = `EU-${String(600 + k).padStart(6, '0')}`; });
+    histEwas.forEach((e) => { e.euNo = renum[e.euNo] ?? e.euNo; });
     gatePasses.forEach((g) => { if (g.euNo) g.euNo = renum[g.euNo] ?? g.euNo; });
   }
   chassis.filter((c) => c.status === 'Allocated').forEach((c) => { c.allocation = { clientCode: 'C-00123', contractNo: 'LTL-2026-0045', date: ago(1), expectedReturn: ahead(30) }; });
@@ -469,10 +498,31 @@ export function buildSeed(): Db {
     { vendorId: 'V-001', name: 'Tire Pro Supply', tin: '000-111-222-000', address: 'Quezon City', email: 'vendor@tirepro.ph', paymentTerms: '30 days', status: 'Active' },
     { vendorId: 'V-002', name: 'Axle & Brake Parts Co.', tin: '000-333-444-000', address: 'Valenzuela', email: 'sales@axlebrake.ph', paymentTerms: '15 days', status: 'Active' },
     { vendorId: 'V-003', name: 'Roadside Rescue Partners', tin: '000-555-666-000', address: 'Cavite', email: 'dispatch@rrp.ph', paymentTerms: '30 days', status: 'Active' },
+    { vendorId: 'V-005', name: 'Luzon Brake & Axle Trading', tin: '000-999-111-000', address: 'Caloocan', email: 'sales@luzonbrake.ph', paymentTerms: '30 days', status: 'Pending', statusReason: 'Vendor accreditation in progress (Procurement)' },
   ];
 
   const breakdown = chassis.find((c) => c.status === 'Breakdown')!;
   const inRepair = chassis.find((c) => c.status === 'In Repair')!;
+
+  // Portal dashboard review (2026-11-11): the client's own notifications, each linking to the record in the portal.
+  const clientNotifications: Db['notifications'] = (() => {
+    const abc = 'client@abclogistics.ph';
+    const note = (id: string, at: string, title: string, body: string, link: string, read: boolean, userId = abc) => ({ id, at, title, body, link, read, requiresAck: false, userId });
+    const rsc41 = onHire[0]?.chassisNo ?? '';
+    const back = gatePasses.filter((g) => g.clientCode === 'C-00123' && g.direction === 'IN').sort((a, b) => b.actualEventAt.localeCompare(a.actualEventAt));
+    const due1101 = invoices.find((i) => i.invoiceNo === 'INV-MNL-00001101');
+    return [
+      note('N-CL-8', addHours(now(), -0.9), 'Rescue RSC-000041 received', `${rsc41} · urgent · the dispatcher will call your scene contact to confirm the crew and ETA.`, '/client/rescue?open=RSC-000041', false),
+      note('N-CL-7', addHours(now(), -3), 'EWA EU-000781 created', 'MNL · Juan Dela Cruz · NAB 5678 · valid for 24 hours.', '/client/ewa?open=EU-000781', false),
+      note('N-CL-6', addHours(now(), -10), 'E-wallet close to the minimum', `Balance ${formatPhp(11951.2)} — below ${formatPhp(12500)} (125% of the ${formatPhp(10000)} minimum). Top up to keep rescue and repair charges covered.`, '/client/ewallet', false),
+      note('N-CL-5', ago(1), 'Payment reminder: INV-MNL-00001101', `${formatPhp(due1101?.total)} due ${formatDate(due1101?.dueDate)}.`, '/client/invoices?open=INV-MNL-00001101', false),
+      note('N-CL-4', ago(13), 'Invoice INV-MNL-00001102 sent', 'Weekly lease billing — copy sent to billing@example.ph.', '/client/invoices?open=INV-MNL-00001102', true),
+      note('N-CL-3', ago(12), 'Debit memo DM-000039 posted', `Park & Fix ABC-CH-2210 — ${formatPhp(2800)}.`, '/client#charges', true),
+      ...back.map((g, k) => note(`N-CL-R${k}`, g.actualEventAt, `Unit ${g.chassisNo} returned`, `Gate In ${g.gatePassNo} at ${branches.find((b) => b.code === g.branchCode)?.name ?? g.branchCode}${g.crossBranchCode ? ` (cross-branch, code ${g.crossBranchCode})` : ''}.`, '/client#returns', true)),
+      note('N-CL-1', ago(60), `E-wallet deduction ${formatPhp(18048.8)}`, 'Rescue RSC-000020 (debit memo DM-000021) — balance ' + formatPhp(11951.2) + '.', '/client/ewallet', true),
+      note('N-PM-1', ago(15), 'Account on hold', 'INV-MNL-00001050 is 31 days past due. New EWAs and rescue requests are blocked until the balance is settled.', '/client/invoices', false, 'client@pacificmovers.ph'),
+    ];
+  })();
 
   return {
     version: 4,
@@ -514,7 +564,11 @@ export function buildSeed(): Db {
     ],
     ewas: [
       { euNo: 'EU-000781', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'MNL', driverName: 'Juan Dela Cruz', driverLicenseNo: 'N01-23-456789', truckPlateNo: 'NAB 5678', trucker: 'XYZ Trucking',
-        units: [{ equipmentType: 'EQ1', qty: 1, usedChassis: [] }], createdAt: addHours(now(), -3), validUntil: addHours(now(), 21), createdVia: 'Portal', status: 'Active', extensionCount: 0, createdBy: 'client@abclogistics.ph' },
+        units: [{ equipmentType: 'EQ1', qty: 1, usedChassis: [] }], createdAt: addHours(now(), -3), validUntil: addHours(now(), 21), createdVia: 'Portal', status: 'Active', extensionCount: 0, createdBy: 'client@abclogistics.ph',
+        // Portal New EWA review (GAT-002 / N08): the full-detail email log shown on the EWA.
+        expectedPickupAt: addHours(now(), 2), remarks: 'Driver arrives after lunch; please stage the unit near Gate 2.',
+        delivery: ([['Client', 'Maria Santos', 'client@abclogistics.ph'], ['Client', 'ABC Logistics Inc. (company email)', 'accounts@example.ph'], ['Delbros', 'Rocky Santos — Branch Generalist, MNL', 'bg.mnl@demo.delbros.local'], ['Delbros', 'Jasmine Reyes — Account Executive', 'ae.jreyes@demo.delbros.local']] as const)
+          .map(([audience, recipient, to]) => ({ at: addHours(now(), -3), channel: 'Email' as const, audience, recipient, to, status: 'Sent' as const })) },
       // Expired portal EWA so the client portal shows the "Request extension" path (portal review, DBL-GAT-003).
       { euNo: 'EU-000770', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'MNL', driverName: 'Mario Reyes', driverLicenseNo: 'N02-15-334455', truckPlateNo: 'NAB 5679', trucker: 'XYZ Trucking',
         units: [{ equipmentType: 'EQ2', qty: 1, usedChassis: [] }], createdAt: addHours(now(), -40), validUntil: addHours(now(), -16), createdVia: 'Portal', status: 'Expired', extensionCount: 0, createdBy: 'client@abclogistics.ph' },
@@ -619,7 +673,7 @@ export function buildSeed(): Db {
       ],
     }, ...adminWorkflows],
     notificationRules,
-    notifications: adminNotifications,
+    notifications: [...clientNotifications, ...adminNotifications],
     audit: [{ id: 'A-1', at: ago(15), actor: 'system', action: 'client.hold.applied', entityType: 'client', entityId: 'C-00188', after: { status: 'Hold' }, reason: 'Invoice INV-MNL-00001050 unpaid 31 days past due (BR-02)' }],
     settings: DEFAULT_SETTINGS.map((s) => ({ ...s })),
     // Park & Fix stores CLIENT-OWNED trailers (not in the Delbros fleet, so never in Available / DCIR fleet totals).
@@ -638,7 +692,7 @@ export function buildSeed(): Db {
       { reqNo: 'UR-000029', clientCode: 'C-00188', contractNo: 'SPL-2026-0012', branchCode: 'MNL', equipmentType: 'EQ2', qty: 1, targetPickupDate: ahead(1).slice(0, 10), notes: 'Client on credit hold — cannot allocate until lifted.', allocated: [], status: 'Open', createdAt: ago(3), createdBy: 'AE.JREYES' },
       { reqNo: 'UR-000028', clientCode: 'C-00215', contractNo: 'QLP-2026-0007', branchCode: 'BTG', equipmentType: 'EQ5', qty: 1, targetPickupDate: ahead(7).slice(0, 10), requiredParts: 'Extra spare tire', allocated: [], status: 'Open', createdAt: ago(4), createdBy: 'AE.JREYES' },
     ],
-    crossBranchCodes: [],
+    crossBranchCodes: crossBranch,
     seq: { EU: 781, GP: 2000, EIR: 500, JO: 520, RSC: 41, INV: 1200, OR: 460, CM: 10, DM: 40, PR: 210, PO: 155, RR: 60, RFP: 30, PCV: 88, CT: 70, CL: 260, WF: 10, LE: 1, SOA: 318, STK: 120,EWT: 10, HL: 1 },
   };
 }

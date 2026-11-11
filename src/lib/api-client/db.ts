@@ -3,7 +3,7 @@ import type {
   EquipmentType, Ewa, Ewallet, GateOverride, EwalletTxn, GatePass, HoldEvent, Invoice, JobOrder, LateEncoding, Memo, NotificationRule,
   ParkFixRecord, Part, PaymentRequest, PurchaseOrder, PurchaseRequest, Receipt, ReceivingReport, Registration, RescueRequest,
   SalesActivity, SettingDef, Warehouse, RateCardRow, MasterListItem, StockBalance, StockTxn, TopupRequest, User, Vendor, VendorInvoice, WorkflowInstance, Grants,
-  UnitRequest, ClientFeedback,
+  UnitRequest, ClientFeedback, ReturnRequest,
 } from '../shared';
 import { buildSeed } from './seed';
 
@@ -24,10 +24,24 @@ export interface Db {
   seq: Record<string, number>;
   gateOverrides?: GateOverride[]; // DBL-CNC-001 (optional so persisted v4 DBs keep loading)
   warehouses?: Warehouse[]; rateCards?: RateCardRow[]; masterLists?: MasterListItem[]; // SUP-06 (optional; backfilled by api.admin)
+  /** Portal sign-in review: password-reset links (token, expiry, single use). */
+  passwordResets?: PasswordReset[];
+  /** Portal sign-in review: "Request portal access" submissions (client or vendor) with their supporting documents. */
+  accessRequests?: AccessRequest[];
+  /** Portal dashboard review: client return requests for on-hire units. */
+  returnRequests?: ReturnRequest[];
+}
+
+export interface PasswordReset { token: string; userId: string; createdAt: string; expiresAt: string; usedAt?: string }
+export interface AccessRequest {
+  reference: string; accountType: 'client' | 'vendor'; subjectId: string; companyName: string; tin: string; branchCode: string; address: string;
+  contactName: string; email: string; phone: string; documents: string[]; submittedAt: string; status: 'Submitted' | 'Approved' | 'Rejected'; reviewer: string;
 }
 
 const KEY = 'delbros.mockdb.v4';
-export const DB_VERSION = 13; // 2026-11-02: portal review 1.1 data fixes (EWA numbering, EU-000765 cancelled, RSC-000020, Manila-day dates); reloads the mock DB once
+export const DB_VERSION = 16; // 2026-11-11: portal New EWA review — EWA email log, pickup time and remarks on EU-000781; reloads the mock DB once
+// v15 (same day): 2026-11-11: portal dashboard review — FRS gate-pass numbers, a cross-branch return, client notifications; reloads the mock DB once
+// v14 (same day): portal sign-in review — demo accounts for locked / inactive / not-accredited / Allow Online off / vendor states
 
 function load(): Db {
   try {

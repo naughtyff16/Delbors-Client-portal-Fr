@@ -9,9 +9,7 @@ import {
   LifeBuoy,
   LocateFixed,
   Plus,
-  ShieldOff,
   Siren,
-  Truck,
   Upload,
   Wallet,
   X,
@@ -22,8 +20,6 @@ import {
   formatDate,
   formatDateTime,
   formatPhp,
-  toneFor,
-  type StatusDomain,
 } from "../lib/shared";
 import {
   Badge,
@@ -51,459 +47,25 @@ import {
   type ColumnDef,
 } from "../lib/ui";
 import { errMessage, useAction, useData } from "../auth";
+import {
+  AccountRestriction,
+} from "./restrictions";
 import logo from "../assets/delbros-logo.png";
+import { EwaDeliveryLog, NewEwaDialog } from "./ewaNew";
+import {
+  PortalStatus,
+  WALLET_STATES,
+  useOpenParam,
+  walletRule,
+  walletStateOf,
+  walletTone,
+} from "./portalUi";
 
-// ── SCR-10 Client Self-Service Portal (Dashboard) ──────────────────────────
-const LOW_WALLET_FACTOR = 1.25; // UI cue only: warn when the e-wallet is within 25% above the minimum
-/** One tone rule for the e-wallet balance on every portal screen (dashboard tile and E-wallet page). */
-function walletTone(
-  w?: { balance: number; minimumBalance: number } | null,
-): "default" | "danger" | "warning" | "success" {
-  if (!w) return "default";
-  if (w.balance < 0) return "danger";
-  return w.balance < w.minimumBalance * LOW_WALLET_FACTOR
-    ? "warning"
-    : "success";
-}
-/** Status pill with sentence-case text ("Partially paid", "Extension pending"); colour still comes from the shared status map. */
-function PortalStatus({
-  domain,
-  value,
-}: {
-  domain: StatusDomain;
-  value?: string | null;
-}) {
-  if (!value) return <span className="text-muted">—</span>;
-  return (
-    <Badge tone={toneFor(domain, value)}>
-      {value.charAt(0) + value.slice(1).toLowerCase()}
-    </Badge>
-  );
-}
-/** Review 1.1: the amber rule, stated wherever the wallet colour is shown (proposed — Finance to confirm, EWL-004). */
-const walletRule = (min: number) =>
-  `Amber below ${formatPhp(min * LOW_WALLET_FACTOR)} (125% of the minimum), red below ₱0`;
-const daysFromToday = (iso: string) =>
-  Math.ceil(
-    (new Date(iso).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) /
-      86_400_000,
-  );
-const dueText = (n: number) =>
-  n < 0
-    ? `overdue ${-n} day${n === -1 ? "" : "s"}`
-    : n === 0
-      ? "due today"
-      : `due in ${n} day${n === 1 ? "" : "s"}`;
-const MiniHead = ({
-  cols,
-  children,
-}: {
-  cols: string;
-  children: ReactNode;
-}) => (
-  <div
-    className={cn(
-      "hidden gap-3 border-b border-line pb-2 text-xs font-medium uppercase tracking-wide text-muted sm:grid",
-      cols,
-    )}
-  >
-    {children}
-  </div>
-);
-
-export function ClientDashboard() {
-  const d = useData(["portal-dash"], () => api.portal.dashboard());
-  const ref = useData(["ref"], () => api.ref.all());
-  if (!d.data) return <p className="text-muted">Loading…</p>;
-  const x = d.data;
-  const w = x.ewallet;
-  const eqName = (c: string) =>
-    ref.data?.equipmentTypes.find((q) => q.code === c)?.name ?? c;
-  const walletLow = walletTone(w) === "warning" || walletTone(w) === "danger";
-  const dueIn = x.oldestDue ? daysFromToday(x.oldestDue) : undefined;
-  const expIn = x.activeContracts.nearestExpiry
-    ? daysFromToday(x.activeContracts.nearestExpiry)
-    : undefined;
-  return (
-    <>
-      <PageHeader
-        title={x.client.clientName}
-        meta={<StatusBadge domain="client" value={x.client.status} />}
-        description={`Account ${x.client.clientCode}`}
-      />
-      {x.client.status === "Hold" && (
-        <Banner
-          tone="danger"
-          className="mb-5"
-          title="Your account is on hold"
-          actions={
-            <Link to="/client/invoices">
-              <Button size="sm" variant="danger">
-                View balance
-              </Button>
-            </Link>
-          }
-        >
-          Overdue balance {formatPhp(x.overdue)}. New EWAs, chassis release and
-          new services are paused until the balance is settled. Please contact
-          Credit &amp; Collection or your Account Executive.
-        </Banner>
-      )}
-      <div className="mb-5 grid gap-3 sm:grid-cols-3">
-        {[
-          {
-            to: "/client/ewa",
-            label: "Create EWA",
-            hint: "Authorise a driver pickup",
-            icon: Truck,
-            g: x.gates.ewa,
-          },
-          {
-            to: "/client/rescue",
-            label: "Request rescue",
-            hint: "Report a breakdown on the road",
-            icon: LifeBuoy,
-            g: x.gates.rescue,
-          },
-          {
-            to: "/client/invoices",
-            label: "View contracts & SOA",
-            hint: "Invoices, balances and statement",
-            icon: FileText,
-            g: { allowed: true },
-          },
-        ].map((q) => (
-          <Link
-            key={q.to}
-            to={q.to}
-            className={cn(
-              "flex items-center gap-3 rounded-xl border p-4 transition-colors",
-              q.g.allowed
-                ? "border-line bg-surface hover:border-brand-300 hover:bg-brand-50"
-                : "border-danger-line bg-danger-bg/40",
-            )}
-          >
-            <span
-              className={cn(
-                "flex size-10 items-center justify-center rounded-lg",
-                q.g.allowed
-                  ? "bg-brand-50 text-brand-600"
-                  : "bg-danger-bg text-danger",
-              )}
-            >
-              {q.g.allowed ? (
-                <q.icon className="size-5" />
-              ) : (
-                <ShieldOff className="size-5" />
-              )}
-            </span>
-            <span>
-              <span className="block font-semibold text-ink">{q.label}</span>
-              <span className="text-xs text-muted">
-                {q.g.allowed ? q.hint : "Unavailable — account restricted"}
-              </span>
-            </span>
-          </Link>
-        ))}
-      </div>
-      <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <KpiTile
-          label="Unpaid bills"
-          value={x.unpaidCount}
-          hint={formatPhp(x.unpaidTotal)}
-          tone={x.overdue ? "danger" : "default"}
-        />
-        {/* Review 1.1: amount and overdue state of the oldest due date. */}
-        <KpiTile
-          label="Oldest due"
-          value={
-            <span className="[font-variant-numeric:normal]">
-              {formatDate(x.oldestDue)}
-            </span>
-          }
-          tone={
-            x.oldestDueOverdue || (dueIn != null && dueIn < 0)
-              ? "danger"
-              : "default"
-          }
-          hint={
-            dueIn == null ? (
-              "Nothing due"
-            ) : (
-              <>
-                {formatPhp(x.oldestDueAmount)} · {dueText(dueIn)}
-              </>
-            )
-          }
-        />
-        <KpiTile
-          label="E-wallet"
-          value={w ? formatPhp(w.balance) : "—"}
-          tone={walletTone(w)}
-          hint={
-            w ? (
-              <span title={walletRule(w.minimumBalance)}>
-                Minimum {formatPhp(w.minimumBalance)}
-                {walletLow && (
-                  <>
-                    {" "}
-                    ·{" "}
-                    <Link
-                      to="/client/ewallet"
-                      className="font-medium text-brand-600 hover:underline"
-                    >
-                      Top up
-                    </Link>
-                  </>
-                )}
-              </span>
-            ) : undefined
-          }
-        />
-        <KpiTile label="Units on hire" value={x.onHire.length} />
-        {/* Review 1.1 (RPT-009 / CLT-011): active contracts with the nearest expiry. */}
-        <KpiTile
-          label="Active contracts"
-          value={x.activeContracts.count}
-          tone={expIn != null && expIn <= 30 ? "warning" : "default"}
-          hint={
-            x.activeContracts.nearestExpiry ? (
-              <Link to="/client/contracts" className="hover:underline">
-                Expires {formatDate(x.activeContracts.nearestExpiry)}
-              </Link>
-            ) : (
-              "No end date"
-            )
-          }
-        />
-      </div>
-      {/* Cards in a row stretch to the same height so no grey gap opens beside the longer list. */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="On-hire equipment" />
-          {/* The list is on-hire by definition, so no per-row status pill. */}
-          {x.onHire.length ? (
-            <ul className="divide-y divide-line">
-              {x.onHire.map((c) => (
-                <li
-                  key={c.chassisNo}
-                  className="flex flex-wrap justify-between gap-x-3 py-2 text-sm"
-                >
-                  <span>
-                    <span className="font-mono">{c.chassisNo}</span>{" "}
-                    <span className="text-muted">
-                      · {eqName(c.chassisType)}
-                    </span>
-                  </span>
-                  <span className="text-muted">
-                    On hire since {formatDate(c.gateOut)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted">No units on hire.</p>
-          )}
-        </Card>
-        <Card className="flex flex-col">
-          <CardHeader
-            title="E-wallet — recent transactions"
-            description={w ? walletRule(w.minimumBalance) : undefined}
-          />
-          {w && w.balance < w.minimumBalance && (
-            <Banner tone="warning" className="mb-3">
-              Your balance is below the minimum.{" "}
-              <Link to="/client/ewallet" className="font-medium underline">
-                Request a top-up
-              </Link>
-              .
-            </Banner>
-          )}
-          {x.walletTxns.length ? (
-            <ul className="divide-y divide-line">
-              {x.walletTxns.map((t) => (
-                <li
-                  key={t.id}
-                  className="flex justify-between gap-3 py-2 text-sm"
-                >
-                  <span className="min-w-0">
-                    <span className="block">
-                      {formatDate(t.at)} · {t.type}
-                      {t.category && t.category !== "Top-up"
-                        ? ` · ${t.category}`
-                        : ""}
-                    </span>
-                    <span className="block truncate text-xs text-muted">
-                      {[t.referenceType, t.referenceId]
-                        .filter(Boolean)
-                        .join(" ")}
-                    </span>
-                  </span>
-                  <span className="text-right">
-                    <MoneyText value={t.amount} />
-                    <span className="block text-xs text-muted">
-                      Balance {formatPhp(t.balanceAfter)}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted">No transactions.</p>
-          )}
-          {w && (
-            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-sm">
-              <span className="text-muted">
-                Cash bond held {formatPhp(x.cashBondHeld)} ·{" "}
-                <Link
-                  to="/client/ewallet"
-                  className="text-brand-600 hover:underline"
-                >
-                  withdrawal
-                </Link>
-              </span>
-              <Link
-                to="/client/ewallet"
-                className="font-medium text-brand-600 hover:underline"
-              >
-                View full ledger
-              </Link>
-            </div>
-          )}
-        </Card>
-        <Card>
-          <CardHeader
-            title="Open service requests"
-            description="Rescue requests not yet completed"
-            actions={
-              <Link
-                to="/client/rescue"
-                className="text-sm text-brand-600 hover:underline"
-              >
-                All requests →
-              </Link>
-            }
-          />
-          {x.openRescues.length ? (
-            <ul className="divide-y divide-line">
-              {x.openRescues.map((r) => (
-                <li
-                  key={r.rescueNo}
-                  className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-                >
-                  <span>
-                    <span className="font-mono">{r.rescueNo}</span>{" "}
-                    <span className="text-muted">
-                      · {r.chassisNo} · {formatDateTime(r.requestedAt)}
-                      {r.urgent ? " · urgent" : ""}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-2">
-                    {r.eta && (
-                      <span className="text-xs text-muted">
-                        ETA {formatDateTime(r.eta)}
-                      </span>
-                    )}
-                    <PortalStatus domain="rescue" value={r.status} />
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted">No open service requests.</p>
-          )}
-        </Card>
-        <Card>
-          <CardHeader
-            title="Returned equipment"
-            description="Units you have returned (Gate In)"
-          />
-          {x.returns.length ? (
-            <ul className="divide-y divide-line">
-              {x.returns.map((r) => (
-                <li
-                  key={r.gatePassNo}
-                  className="flex flex-wrap justify-between gap-x-3 py-2 text-sm"
-                >
-                  <span>
-                    <span className="font-mono">{r.chassisNo}</span>{" "}
-                    <span className="text-muted">
-                      · {r.branchCode} · {r.gatePassNo}
-                    </span>
-                  </span>
-                  <span className="text-muted">
-                    {formatDate(r.hiredAt)} → returned{" "}
-                    {formatDate(r.returnedAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted">No returns yet.</p>
-          )}
-        </Card>
-        <Card className="lg:col-span-2">
-          <CardHeader
-            title="EWA history"
-            actions={
-              <Link
-                to="/client/ewa"
-                className="text-sm text-brand-600 hover:underline"
-              >
-                All EWAs →
-              </Link>
-            }
-          />
-          {x.ewas.length ? (
-            <div className="text-sm">
-              <MiniHead cols="grid-cols-[8.5rem_1fr_7rem_10rem_10rem_9rem]">
-                <span>EU no.</span>
-                <span>Branch · driver</span>
-                <span>Truck</span>
-                <span>Created</span>
-                <span>Valid until</span>
-                <span>Status</span>
-              </MiniHead>
-              <ul className="divide-y divide-line">
-                {x.ewas.map((e) => (
-                  <li
-                    key={e.euNo}
-                    className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 py-2 sm:grid-cols-[8.5rem_1fr_7rem_10rem_10rem_9rem] sm:items-center"
-                  >
-                    <span className="font-mono">{e.euNo}</span>
-                    <span className="min-w-0 truncate max-sm:order-3">
-                      {e.branchCode} · {e.driverName}
-                    </span>
-                    <span className="text-muted max-sm:order-4">
-                      {e.truckPlateNo}
-                    </span>
-                    <span className="text-muted max-sm:hidden">
-                      {formatDateTime(e.createdAt)}
-                    </span>
-                    <span className="text-muted max-sm:order-5">
-                      {formatDateTime(e.validUntil)}
-                    </span>
-                    <span className="max-sm:order-2">
-                      <PortalStatus domain="ewa" value={e.status} />
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-sm text-muted">No EWAs yet.</p>
-          )}
-        </Card>
-      </div>
-    </>
-  );
-}
+// SCR-10 Client Self-Service Portal (Dashboard) lives in ./dashboard.tsx; shared portal helpers in ./portalUi.tsx.
 
 // ── SCR-14 EWA Creation (portal variant) + EWA list ────────────────────────
 const NEAR_EXPIRY_H = 3; // UI hint only: highlight Active EWAs expiring within this many hours
-// Review 1.1 — proposed format rules (Operations / Gate to confirm): LTO plate "ABC 1234" / "AB 1234" / "ABC 123"; LTO licence "N01-23-456789".
-const PLATE_RE = /^[A-Z]{2,3} ?\d{3,4}$/;
-const LICENCE_RE = /^[A-Z]\d{2}-\d{2}-\d{6}$/;
+// LTO plate / licence format rules: PLATE_RE / LICENCE_RE in lib/shared (also checked by the API). New EWA dialog: ./ewaNew.tsx.
 /** Label / value grid used by the portal detail views. */
 function Dl({
   rows,
@@ -543,6 +105,9 @@ function EwaPrint({
     | "validUntil"
     | "status"
     | "units"
+    | "truckOrcr"
+    | "expectedPickupAt"
+    | "remarks"
   >;
   client?: string;
   eqName: (c: string) => string;
@@ -577,7 +142,10 @@ function EwaPrint({
               ["Driver", e.driverName],
               ["Driver licence no.", e.driverLicenseNo],
               ["Truck plate no.", e.truckPlateNo],
+              ["Truck OR/CR no.", e.truckOrcr ?? "Verified at Gate Out"],
               ["Created", formatDateTime(e.createdAt)],
+              ...(e.expectedPickupAt ? [["Expected pickup", formatDateTime(e.expectedPickupAt)]] : []),
+              ...(e.remarks ? [["Remarks", e.remarks]] : []),
             ] as [string, ReactNode][]
           ).map(([l, v]) => (
             <tr key={l}>
@@ -610,89 +178,10 @@ export function ClientEwaPage() {
   const ref = useData(["ref"], () => api.ref.all());
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const blankEwa = {
-    contractNo: "",
-    branchCode: "",
-    driverName: "",
-    driverLicenseNo: "",
-    truckPlateNo: "",
-    trucker: "",
-    eq: "",
-    qty: 1,
-  };
-  const [v, setV] = useState(blankEwa);
-  const [tried, setTried] = useState(false);
+  // GAT-002: the confirmation after creation (EU number, valid until, full details, email delivery).
   const [created, setCreated] = useState<Awaited<
     ReturnType<typeof api.gate.createEwa>
   > | null>(null);
-  const create = useAction(
-    () =>
-      api.gate.createEwa({
-        clientCode: "",
-        contractNo: v.contractNo,
-        branchCode: v.branchCode,
-        driverName: v.driverName.trim(),
-        driverLicenseNo: v.driverLicenseNo.trim().toUpperCase(),
-        truckPlateNo: v.truckPlateNo.trim().toUpperCase().replace(/\s+/g, " "),
-        trucker: v.trucker.trim(),
-        units: [{ equipmentType: v.eq, qty: v.qty }],
-      }),
-    {
-      onSuccess: (e) => {
-        setOpen(false);
-        setTried(false);
-        setV(blankEwa);
-        setCreated(e);
-      },
-    },
-  );
-  // Availability of each equipment type at the chosen branch (review 1.1: quantity cannot exceed what the yard has).
-  const avail = useData(
-    ["ewa-avail", v.branchCode],
-    () => api.gate.availability(v.branchCode),
-    !!v.branchCode,
-  );
-  const need = (val: string | number) =>
-    tried && !String(val).trim() ? "Required" : undefined;
-  const plateErr =
-    v.truckPlateNo.trim() && !PLATE_RE.test(v.truckPlateNo.trim().toUpperCase())
-      ? "Use the LTO format, e.g. NAB 5678"
-      : undefined;
-  const licErr =
-    v.driverLicenseNo.trim() &&
-    !LICENCE_RE.test(v.driverLicenseNo.trim().toUpperCase())
-      ? "Use the LTO format, e.g. N01-23-456789"
-      : undefined;
-  const maxQty = v.eq && avail.data ? (avail.data[v.eq] ?? 0) : undefined;
-  const qtyErr =
-    !Number.isInteger(v.qty) || v.qty < 1
-      ? "Whole number, at least 1"
-      : maxQty != null && v.qty > maxQty
-        ? `Only ${maxQty} available at this branch`
-        : undefined;
-  const missingDriverTruck =
-    tried &&
-    (!v.driverName.trim() ||
-      !v.driverLicenseNo.trim() ||
-      !v.truckPlateNo.trim() ||
-      !v.trucker.trim());
-  const submitEwa = () => {
-    setTried(true);
-    if (
-      !v.contractNo ||
-      !v.branchCode ||
-      !v.driverName.trim() ||
-      !v.driverLicenseNo.trim() ||
-      !v.truckPlateNo.trim() ||
-      !v.trucker.trim() ||
-      !v.eq ||
-      qtyErr ||
-      plateErr ||
-      licErr
-    )
-      return;
-    create.mutate(undefined);
-  };
   const [status, setStatus] = useState<
     "All" | "Active" | "Used" | "Expired" | "Cancelled"
   >("All");
@@ -701,29 +190,10 @@ export function ClientEwaPage() {
     void navigator.clipboard?.writeText(euNo);
     toast.success(`EU no. ${euNo} copied`);
   };
-  const gate = dash.data?.gates.ewa;
-  const contracts = (dash.data?.contracts ?? []).filter(
-    (c) => c.status === "Active",
-  );
-  const branches = (ref.data?.branches ?? []).filter((b) =>
-    dash.data?.client.cwsBranchAccess.includes(b.code),
-  );
-  // Review 1.1: equipment types limited to the selected contract's rate card, with the count available at the branch.
-  const selContract = contracts.find((c) => c.contractNo === v.contractNo);
-  const eqOptions = (ref.data?.equipmentTypes ?? [])
-    .filter(
-      (q) =>
-        !selContract ||
-        selContract.rates.some((r) => r.equipmentType === q.code),
-    )
-    .map((q) => ({
-      value: q.code,
-      label: avail.data
-        ? `${q.name} — ${avail.data[q.code] ?? 0} available`
-        : q.name,
-    }));
   type Row = EwaRow;
   const [view, setView] = useState<Row | null>(null);
+  // Notification links open the record: /client/ewa?open=EU-000781.
+  useOpenParam(ewas.data as Row[] | undefined, (r, id) => r.euNo === id, setView);
   const [ext, setExt] = useState<Row | null>(null);
   const [reason, setReason] = useState("");
   const extend = useAction(() => api.gate.requestExtension(ext!.euNo, reason), {
@@ -768,23 +238,12 @@ export function ClientEwaPage() {
         title="Electronic Withdrawal Authorizations"
         description="Authorise your driver to pick up units. Each EWA is valid for 24 hours; the driver presents the EU number at the gate. Expired EWAs can be extended with manager approval."
         actions={
-          <Button
-            icon={<Plus className="size-4" />}
-            disabled={!gate?.allowed}
-            onClick={() => {
-              setTried(false);
-              setOpen(true);
-            }}
-          >
+          <Button icon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
             New EWA
           </Button>
         }
       />
-      {gate && !gate.allowed && (
-        <Banner tone="danger" className="mb-4" title="EWA creation unavailable">
-          {gate.reason}
-        </Banner>
-      )}
+      <AccountRestriction dash={dash.data} scope="ewa" className="mb-4" />{/* hold (BR-01) or Allow Online = No */}
       <DataTable<Row>
         data={(ewas.data ?? []).filter(
           (e) =>
@@ -961,6 +420,21 @@ export function ClientEwaPage() {
                 ],
                 ["Valid until", formatDateTime(view.validUntil)],
                 ["Extensions granted", view.extensionCount],
+                [
+                  "Truck OR/CR no.",
+                  view.truckOrcr ??
+                    view.gatePasses.find((g) => g.truckOrcr)?.truckOrcr ??
+                    "Verified at Gate Out",
+                ],
+                [
+                  "Expected pickup",
+                  view.expectedPickupAt
+                    ? formatDateTime(view.expectedPickupAt)
+                    : "Not given",
+                ],
+                ...(view.remarks
+                  ? ([["Remarks", view.remarks]] as [string, ReactNode][])
+                  : []),
               ]}
             />
             <ul className="divide-y divide-line rounded-lg border border-line text-sm">
@@ -1004,6 +478,11 @@ export function ClientEwaPage() {
                 </ul>
               </div>
             )}
+            <EwaDeliveryLog
+              euNo={view.euNo}
+              status={view.status}
+              delivery={view.delivery}
+            />
             {view.status === "Cancelled" && (
               <Banner
                 tone="info"
@@ -1062,123 +541,15 @@ export function ClientEwaPage() {
           )}
         </Stack>
       </Modal>
-      <Modal
+      <NewEwaDialog
         open={open}
         onClose={() => setOpen(false)}
-        title="New EWA"
-        description="Valid for 24 hours. Your driver presents the EU number at the gate."
-        size="lg"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button loading={create.isPending} onClick={submitEwa}>
-              Create EWA
-            </Button>
-          </>
-        }
-      >
-        <Stack>
-          <FormGrid>
-            <Select
-              label="Contract"
-              required
-              error={need(v.contractNo)}
-              value={v.contractNo}
-              onChange={(e) => setV({ ...v, contractNo: e.target.value })}
-              placeholder="Select"
-              options={contracts.map((c) => ({
-                value: c.contractNo,
-                label: `${c.contractNo} · Class ${c.class}`,
-              }))}
-            />
-            <Select
-              label="Pickup branch"
-              required
-              error={need(v.branchCode)}
-              value={v.branchCode}
-              onChange={(e) => setV({ ...v, branchCode: e.target.value })}
-              placeholder="Select"
-              options={branches.map((b) => ({ value: b.code, label: b.name }))}
-              hint="Branches enabled for your account"
-            />
-            <Input
-              label="Trucker"
-              required
-              error={need(v.trucker)}
-              value={v.trucker}
-              onChange={(e) => setV({ ...v, trucker: e.target.value })}
-              placeholder="e.g. ABC Trucking Services"
-            />
-            <Input
-              label="Truck plate no."
-              required
-              error={need(v.truckPlateNo) ?? (tried ? plateErr : undefined)}
-              value={v.truckPlateNo}
-              onChange={(e) =>
-                setV({ ...v, truckPlateNo: e.target.value.toUpperCase() })
-              }
-              placeholder="e.g. NAB 5678"
-            />
-            <Input
-              label="Driver name"
-              required
-              error={need(v.driverName)}
-              value={v.driverName}
-              onChange={(e) => setV({ ...v, driverName: e.target.value })}
-              placeholder="e.g. Juan Dela Cruz"
-            />
-            <Input
-              label="Driver licence no."
-              required
-              error={need(v.driverLicenseNo) ?? (tried ? licErr : undefined)}
-              value={v.driverLicenseNo}
-              onChange={(e) =>
-                setV({ ...v, driverLicenseNo: e.target.value.toUpperCase() })
-              }
-              placeholder="e.g. N01-23-456789"
-            />
-            <Select
-              label="Equipment type"
-              required
-              error={need(v.eq)}
-              value={v.eq}
-              onChange={(e) => setV({ ...v, eq: e.target.value })}
-              placeholder={v.contractNo ? "Select" : "Select a contract first"}
-              options={eqOptions}
-              hint={
-                v.branchCode
-                  ? "Types on your contract, with units available at the branch"
-                  : "Choose the pickup branch to see availability"
-              }
-            />
-            <Input
-              label="Quantity"
-              required
-              type="number"
-              min={1}
-              max={maxQty || undefined}
-              step={1}
-              error={
-                tried || (maxQty != null && v.qty > maxQty) ? qtyErr : undefined
-              }
-              value={v.qty}
-              onChange={(e) => setV({ ...v, qty: Number(e.target.value) })}
-              placeholder="e.g. 1"
-            />
-          </FormGrid>
-          {missingDriverTruck && (
-            <Banner tone="danger" title="Missing driver/truck info">
-              Enter the trucker, truck plate no., driver name and driver licence
-              no. — the gate checks them against the EWA.
-            </Banner>
-          )}
-          {create.error && (
-            <Banner tone="danger">{errMessage(create.error)}</Banner>
-          )}
-        </Stack>
-      </Modal>
+        onCreated={(e) => {
+          setOpen(false);
+          setCreated(e);
+        }}
+        eqName={eqName}
+      />
       {/* Review 1.1 (GAT-002): confirmation with the generated EU number, validity and full details; notification sent to the client and Delbros. */}
       <Modal
         open={!!created}
@@ -1237,13 +608,28 @@ export function ClientEwaPage() {
                     .join(", "),
                 ],
                 ["Created", formatDateTime(created.createdAt)],
+                ["Truck OR/CR no.", created.truckOrcr ?? "Verified at Gate Out"],
+                [
+                  "Expected pickup",
+                  created.expectedPickupAt
+                    ? formatDateTime(created.expectedPickupAt)
+                    : "Not given",
+                ],
+                ...(created.remarks
+                  ? ([["Remarks", created.remarks]] as [string, ReactNode][])
+                  : []),
               ]}
             />
-            <Banner tone="success">
-              Details emailed to{" "}
-              {dash.data?.client.email ?? "your registered email"} and sent to
-              the {created.branchCode} branch and your Account Executive.
-            </Banner>
+            <EwaDeliveryLog
+              euNo={created.euNo}
+              status={created.status}
+              delivery={created.delivery}
+            />
+            <p className="text-xs text-muted">
+              If your driver cannot reach the gate in time, request an extension
+              from the EWA list once it expires — it needs manager approval and
+              revalidation by Delbros (BR-06).
+            </p>
           </Stack>
         )}
       </Modal>
@@ -1336,6 +722,8 @@ export function ClientRescuePage() {
   const w = dash.data?.ewallet;
   type Row = NonNullable<typeof list.data>[number];
   const [view, setView] = useState<Row | null>(null);
+  // Notification links open the record: /client/rescue?open=RSC-000041.
+  useOpenParam(list.data as Row[] | undefined, (r, id) => r.rescueNo === id, setView);
   const [cancelOf, setCancelOf] = useState<Row | null>(null);
   const [cancelWhy, setCancelWhy] = useState("");
   const cancel = useAction(
@@ -1404,15 +792,7 @@ export function ClientRescuePage() {
         title="Roadside rescue"
         description="Request emergency assistance for a unit on hire. Charges are deducted from your e-wallet after the rescue."
       />
-      {gate && !gate.allowed && (
-        <Banner
-          tone="danger"
-          className="mb-4"
-          title="Rescue requests unavailable"
-        >
-          {gate.reason}
-        </Banner>
-      )}
+      <AccountRestriction dash={dash.data} scope="rescue" className="mb-4" />{/* hold (BR-01) or Allow Rescue = No */}
       {/* Review 1.1 (BR-04): requests are still accepted below the minimum; the charge may take the wallet negative. */}
       {gate?.allowed && w && w.balance < w.minimumBalance && (
         <Banner
@@ -2179,6 +1559,7 @@ export function ClientInvoicesPage() {
   );
   type Row = InvRow;
   const [inv, setInv] = useState<Row | null>(null);
+  useOpenParam(invs.data as Row[] | undefined, (r, id) => r.invoiceNo === id, setInv);
   const [pay, setPay] = useState<(typeof PAY_FILTERS)[number]>("All");
   // Only one document is mounted for printing at a time: the statement by default, the open invoice while its view is open.
   const [printInv, setPrintInv] = useState(false);
@@ -2662,13 +2043,8 @@ export function ClientEwalletPage() {
           hint={
             w ? (
               <span title={walletRule(w.minimumBalance)}>
-                {w.balance < 0
-                  ? "Negative — top up now"
-                  : w.balance < w.minimumBalance
-                    ? "Below the minimum — please top up"
-                    : walletTone(w) === "warning"
-                      ? `Close to the minimum (amber below ${formatPhp(w.minimumBalance * LOW_WALLET_FACTOR)})`
-                      : "Above the minimum"}
+                {WALLET_STATES[walletStateOf(w)!].label} —{" "}
+                {WALLET_STATES[walletStateOf(w)!].advice.toLowerCase()}
               </span>
             ) : undefined
           }

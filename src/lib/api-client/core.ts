@@ -2,7 +2,8 @@ import { can, resolveGrants, type Action, type AuditEvent, type Grants, type Rol
 import { db, persist, nextNo, uid } from './db';
 
 export class ApiError extends Error {
-  constructor(public code: string, message: string, public status = 400, public fields?: Record<string, string>) { super(message); }
+  /** details: extra data for the screen, e.g. the contact person and lock time on portal sign-in errors. */
+  constructor(public code: string, message: string, public status = 400, public fields?: Record<string, string>, public details?: Record<string, unknown>) { super(message); }
 }
 
 export const delay = (ms = 120) => new Promise((r) => setTimeout(r, ms));
