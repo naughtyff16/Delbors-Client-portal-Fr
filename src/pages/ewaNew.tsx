@@ -193,7 +193,7 @@ function EwaForm({ o, onClose, onCreated, eqName }: { o: Options; onClose: () =>
           suggestions={o.trucks.map((t) => ({ value: t.plate, hint: t.trucker }))} onChange={(e) => setPlate(e.target.value)} />
         <Input label="Driver name" required error={need(v.driverName)} value={v.driverName} placeholder="e.g. Juan Dela Cruz"
           suggestions={o.drivers.map((d) => ({ value: d.name, hint: d.licence }))} onChange={(e) => setDriver(e.target.value)} />
-        <Input label="Driver licence no." required error={need(v.driverLicenseNo) ?? (tried ? licErr : undefined)} value={v.driverLicenseNo} placeholder="e.g. N01-23-456789"
+        <Input label="Driver license no." required error={need(v.driverLicenseNo) ?? (tried ? licErr : undefined)} value={v.driverLicenseNo} placeholder="e.g. N01-23-456789"
           onChange={(e) => setV({ ...v, driverLicenseNo: e.target.value.toUpperCase() })} />
         <Input label="Truck OR/CR no. (optional)" value={v.truckOrcr} placeholder="e.g. OR 4100200 / CR 5200300" hint="The yard checks the original OR/CR at Gate Out"
           onChange={(e) => setV({ ...v, truckOrcr: e.target.value })} />
@@ -205,7 +205,7 @@ function EwaForm({ o, onClose, onCreated, eqName }: { o: Options; onClose: () =>
         hint={`${v.remarks.length}/${REMARKS_MAX}`} onChange={(e) => setV({ ...v, remarks: e.target.value })} />
       {(missingDriverTruck || serverErr?.code === "MISSING_DRIVER_TRUCK_INFO") && (
         <Banner tone="danger" title="Missing driver/truck info">
-          Enter the trucker, truck plate no., driver name and driver licence no. — the gate checks them against the EWA.
+          Enter the trucker, truck plate no., driver name and driver license no. — the gate checks them against the EWA.
         </Banner>
       )}
       {create.error && serverErr?.code !== "MISSING_DRIVER_TRUCK_INFO" && <Banner tone="danger">{errMessage(create.error)}</Banner>}
@@ -223,7 +223,7 @@ export function EwaDeliveryLog({ euNo, status, delivery }: { euNo: string; statu
   const [last, setLast] = useState(delivery);
   if (delivery !== last) { setLast(delivery); setLog(delivery ?? []); }
   const resend = useAction(() => api.gate.resendEwaEmail(euNo), {
-    success: (r) => `EWA email sent again to ${plural(r.length, "recipient")}`,
+    success: (r) => `EWA email queued again for ${plural(r.length, "recipient")}`,
     onSuccess: (r) => setLog((l) => [...l, ...r]),
   });
   const usable = status === "Active" || status === "Partially Used";

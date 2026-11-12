@@ -9,6 +9,7 @@ import { api } from './lib/api-client';
 import { errMessage, useAction, useData, usePortalAuth } from './auth';
 import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from './pages/public';
 import { PrivacyNoticeModal } from './pages/common';
+import { AccessApprovalPage, AccessStatusPage } from './pages/access';
 import { ClientDashboard } from './pages/dashboard';
 import { ClientEwalletPage } from './pages/ewallet';
 import { ClientContractsPage } from './pages/contracts';
@@ -225,6 +226,9 @@ export const router = createBrowserRouter([
   { path: '/register', element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
   { path: '/reset-password', element: <ResetPasswordPage /> },
+  // Timeline 2 review: access request status (applicant) and the reviewer's one-click approval link (DBL-CLT-019).
+  { path: '/access-status', element: <AccessStatusPage /> },
+  { path: '/access-approval/:token', element: <AccessApprovalPage /> },
   { path: '/client', element: <Shell realm="CLIENT_PORTAL" />, children: [
     { index: true, element: <ClientDashboard /> }, { path: 'ewa', element: <ClientEwaPage /> }, { path: 'rescue', element: <ClientRescuePage /> },
     { path: 'invoices', element: <ClientInvoicesPage /> }, { path: 'ewallet', element: <ClientEwalletPage /> }, { path: 'contracts', element: <ClientContractsPage /> },

@@ -111,16 +111,17 @@ export const MiniHead = ({
 export function useOpenParam<T>(
   rows: T[] | undefined,
   match: (row: T, id: string) => boolean,
-  open: (row: T) => void,
+  open: (row: T, action?: "pay" | "cancel") => void,
 ) {
   const [params, setParams] = useSearchParams();
   const id = params.get("open");
   useEffect(() => {
     if (!id || !rows) return;
     const row = rows.find((r) => match(r, id));
-    if (row) open(row);
+    // Timeline 2 review: dashboard entry points add an action (?pay=1 / ?cancel=1) that opens the matching dialog.
+    if (row) open(row, params.get("pay") ? "pay" : params.get("cancel") ? "cancel" : undefined);
     const next = new URLSearchParams(params);
-    next.delete("open");
+    next.delete("open"); next.delete("pay"); next.delete("cancel");
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, rows]);

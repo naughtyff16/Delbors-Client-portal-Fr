@@ -29,7 +29,7 @@ export function periodLabel(i: InvRow) {
 }
 
 /** Lease billing coverage: the periods invoiced, any gap, and what is not yet invoiced (review: 28–31 Oct gap). */
-export function BillingCoverage({ invs, cycle }: { invs: InvRow[]; cycle?: string }) {
+export function BillingCoverage({ invs, cycle, week }: { invs: InvRow[]; cycle?: string; week?: string }) {
   const lease = invs.filter((i) => i.isLease && i.status !== "Cancelled").sort((a, b) => a.periodStart.localeCompare(b.periodStart));
   if (!lease.length) return null;
   const gaps: string[] = [];
@@ -44,7 +44,7 @@ export function BillingCoverage({ invs, cycle }: { invs: InvRow[]; cycle?: strin
   const nextInvoice = manilaDay(addDays(`${nextEnd}T12:00:00+08:00`, 1));
   return (
     <p className={cn("mb-3 rounded-lg border px-3 py-2 text-sm", gaps.length ? "border-warning-line bg-warning-bg" : "border-line bg-surface")}>
-      <span className="font-medium text-ink">Lease billing ({(cycle ?? "weekly").toLowerCase()}):</span>{" "}
+      <span className="font-medium text-ink">Lease billing ({(cycle ?? "weekly").toLowerCase()}{week && (cycle ?? "Weekly") === "Weekly" ? `, ${week} weeks — proposed, Delbros to confirm` : ""}):</span>{" "}
       invoiced from {formatDate(lease[0].periodStart)} to {formatDate(last.periodEnd)}{gaps.length ? <span className="text-warning"> — not yet billed: {gaps.join(", ")}</span> : " with no gaps"}.
       {" "}The current period {formatDate(nextStart)} – {formatDate(nextEnd)} accrues daily and is invoiced on {formatDate(nextInvoice)}.
       {" "}<span className="text-muted">Repair, damage and other one-off charges are billed separately and are not lease periods.</span>
@@ -58,7 +58,9 @@ export function soaForPeriod(lines: SoaLine[], from: string, to: string) {
   const before = from ? lines.filter((l) => day(l.date) < from) : [];
   const opening = before.length ? before[before.length - 1].balance : 0;
   const inPeriod = lines.filter((l) => (!from || day(l.date) >= from) && (!to || day(l.date) <= to));
-  const rows = from ? [{ date: `${from}T00:00:00+08:00`, docType: "Balance brought forward", docNo: "", debit: 0, credit: 0, balance: opening } as SoaLine, ...inPeriod] : inPeriod;
+  // Timeline 2 review: the statement always opens with the balance brought forward — ₱0.00 at the account start when no period is chosen.
+  const openAt = from ? `${from}T00:00:00+08:00` : lines[0]?.date ?? new Date().toISOString();
+  const rows = [{ date: openAt, docType: "Balance brought forward", docNo: "", ref: from ? `Closing balance before ${formatDate(from)}` : "Opening balance — account start", debit: 0, credit: 0, balance: opening } as SoaLine, ...inPeriod];
   const closing = inPeriod.length ? inPeriod[inPeriod.length - 1].balance : opening;
   return { rows, opening, closing, debits: inPeriod.reduce((a, l) => a + l.debit, 0), credits: inPeriod.reduce((a, l) => a + l.credit, 0) };
 }

@@ -150,10 +150,29 @@ export interface AccessRequest {
   submittedAt: string;
   status: "Submitted" | "Approved" | "Rejected";
   reviewer: string;
+  /** Timeline 2 review: AE one-click approval link (single use, expires), decision, and every notice sent with its delivery state. */
+  approvalToken?: string;
+  approvalExpiresAt?: string;
+  reviewerUserId?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  decisionReason?: string;
+  billingName?: string;
+  notices?: AccessNotice[];
+}
+export interface AccessNotice {
+  at: string;
+  audience: "Account Executive" | "Procurement" | "Applicant";
+  channel: "Email" | "In-app";
+  to: string;
+  subject: string;
+  link?: string;
+  status: "Sent" | "Queued" | "Failed";
 }
 
 const KEY = "delbros.mockdb.v4";
-export const DB_VERSION = 19; // 2026-11-11: portal Contracts review — entitlement for every type, rate history, ABC expired / terminated contracts, branches covered = enabled branches; reloads the mock DB once
+export const DB_VERSION = 20; // 2026-11-12: Timeline 2 review — invoices from actual hire lines, gate passes in date order, EU-000765 / RSC-000040 audit, pending extension, rescue notices, bond outcomes; reloads the mock DB once
+// v19 (2026-11-11): portal Contracts review — entitlement for every type, rate history, ABC expired / terminated contracts, branches covered = enabled branches
 // v18 (same day): 2026-11-11: portal Invoices / E-wallet / top-up review — missing weekly lease invoice, CM-000010 applied, INV-MNL-00001118 tied to its Gate In, e-wallet reversal pair, a rejected top-up, Metro Container portal user with a refundable bond; reloads the mock DB once
 // v17 (same day): 2026-11-11: portal EWA list / Rescue review — extension history, a partly released EWA, RSC-000042 dispatched, RSC-000020 / RSC-000040 data fixes; reloads the mock DB once
 // v16 (same day): 2026-11-11: portal New EWA review — EWA email log, pickup time and remarks on EU-000781; reloads the mock DB once

@@ -125,3 +125,24 @@ export const TOPUP_RULES = { min: 500, max: 5_000_000, maxFileMb: 5, maxAgeDays:
 export const TOPUP_METHODS = ['Bank transfer (InstaPay)', 'Bank transfer (PESONet)', 'Online banking — same bank', 'Over-the-counter deposit', 'Check deposit'] as const;
 /** Reference the client quotes on the transfer so Treasury can match it: EW- plus the account code. */
 export const topupReference = (clientCode: string) => `EW-${clientCode.replace(/[^A-Z0-9]/gi, '')}`;
+
+// ── Timeline 2 review (2026-11-12) ─────────────────────────────────────────
+export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+/** The weekly billing week from System setting fin.weekly_cycle_start (proposed Friday → Friday–Thursday; Q-FIN-07). */
+export function weeklyCycle(start: string = 'Friday') {
+  const i = Math.max(0, WEEKDAYS.indexOf(start as (typeof WEEKDAYS)[number]));
+  return { start: WEEKDAYS[i], end: WEEKDAYS[(i + 6) % 7], startIndex: i, label: `${WEEKDAYS[i]}–${WEEKDAYS[(i + 6) % 7]}` };
+}
+/** Days back from a Manila calendar day (YYYY-MM-DD) to the most recent given weekday (0 when it is that day). */
+export function daysSinceWeekday(day: string, weekdayIndex: number) {
+  const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
+  return (dow - weekdayIndex + 7) % 7;
+}
+/** Days a hire (Gate Out → Gate In, Manila days, both counted) overlaps a billing period. */
+export function overlapDays(outDay: string, inDay: string | undefined, periodStart: string, periodEnd: string) {
+  const from = outDay > periodStart ? outDay : periodStart;
+  const to = inDay && inDay < periodEnd ? inDay : periodEnd;
+  if (to < from) return null;
+  const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+  return { from, to, days };
+}

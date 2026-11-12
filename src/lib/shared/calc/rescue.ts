@@ -42,3 +42,33 @@ export const RESCUE_PROBLEM_TYPES = [
   { value: 'Other', pricing: 'Travel + tires or parts assessed on site', drives: 'Assessed on site' },
 ] as const;
 export const RESCUE_PROBLEM_OTHER = 'Other';
+
+/**
+ * Timeline 2 review: one rule for the unit while a rescue is open. From Requested until Completed / Cancelled the unit shows
+ * "Under rescue" and Request return is blocked (it is returned after the rescue) — Requested and Dispatched alike (DW-MNL-1003 / DW-BTG-1025).
+ * Proposed — Operations to confirm. crewOnTheWay tells the client a crew has been sent (Dispatched / In progress).
+ */
+export const RESCUE_OPEN_STATUSES = ['Requested', 'Verified', 'Confirmed', 'Dispatched', 'In Progress'] as const;
+export function rescueUnitState(status?: string): { label: 'Under rescue'; blocksReturn: true; crewOnTheWay: boolean; detail: string } | undefined {
+  if (!status || !(RESCUE_OPEN_STATUSES as readonly string[]).includes(status)) return undefined;
+  const crewOnTheWay = status === 'Dispatched' || status === 'In Progress';
+  const detail = status === 'Requested' ? 'request received, awaiting Delbros verification' : status === 'Verified' ? 'verified by Credit & Collection, awaiting confirmation'
+    : status === 'Confirmed' ? 'confirmed, crew being assigned' : status === 'Dispatched' ? 'crew on the way' : 'crew working on the unit';
+  return { label: 'Under rescue', blocksReturn: true, crewOnTheWay, detail };
+}
+
+/**
+ * Timeline 2 review (UC-05 / DBL-CLT-005, "Allow for Rescue requires a funded e-wallet"): the e-wallet check before a rescue request,
+ * from System setting res.funded_wallet_rule (proposed: an e-wallet must be open; a low or negative balance only warns — Finance to confirm).
+ */
+export type FundedWalletRule = 'wallet_exists' | 'positive' | 'minimum' | 'none';
+export function rescueWalletGate(wallet: { balance: number; minimumBalance: number } | null | undefined, rule: string = 'wallet_exists'): { allowed: boolean; code?: 'WALLET'; reason?: string; warning?: string } {
+  const r = (['wallet_exists', 'positive', 'minimum', 'none'].includes(rule) ? rule : 'wallet_exists') as FundedWalletRule;
+  if (r === 'none') return { allowed: true };
+  if (!wallet) return { allowed: false, code: 'WALLET', reason: 'Rescue needs a funded e-wallet, and your e-wallet is not open yet. It opens once Treasury confirms your first deposit — request a top-up or contact your Account Executive.' };
+  if (r === 'positive' && wallet.balance <= 0) return { allowed: false, code: 'WALLET', reason: 'Rescue needs a funded e-wallet: your balance is ₱0 or below. Top up first, or call your Account Executive in an emergency.' };
+  if (r === 'minimum' && wallet.balance < wallet.minimumBalance) return { allowed: false, code: 'WALLET', reason: 'Rescue needs your e-wallet at or above the contract minimum. Top up first, or call your Account Executive in an emergency.' };
+  const warning = wallet.balance < 0 ? 'Your e-wallet is negative. The rescue is still accepted; its charge is deducted afterwards and adds to what you owe — please top up.'
+    : wallet.balance < wallet.minimumBalance ? 'Your e-wallet is below the contract minimum. The rescue is still accepted; please top up so the charge is covered.' : undefined;
+  return { allowed: true, warning };
+}

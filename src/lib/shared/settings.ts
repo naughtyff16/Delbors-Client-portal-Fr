@@ -93,6 +93,12 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   { key: 'portal.vendor_support_phone', label: 'Portal — Procurement contact phone (vendor sign-in)', group: 'Portal', type: 'text', value: '+63 2 8000 2000', rule: 'Portal sign-in (Q-PTL-01)', pending: true },
   { key: 'portal.vendor_support_email', label: 'Portal — Procurement contact email (vendor sign-in)', group: 'Portal', type: 'text', value: 'procurement@demo.delbros.local', rule: 'Portal sign-in (Q-PTL-01)', pending: true },
   { key: 'portal.dpo_email', label: 'Data Protection Officer email (privacy notice)', group: 'Portal', type: 'text', value: 'dpo@demo.delbros.local', rule: 'RA 10173 (Q-PTL-02)', pending: true },
+  // Timeline 2 review (2026-11-12): proposed defaults — each one is a decision for Delbros, switchable without a release.
+  { key: 'portal.registration_extras', label: 'Portal access request — extra fields required at request stage', group: 'Portal', type: 'text', value: 'tin,documents,consent', rule: 'DBL-CLT-019 (Q-PTL-03)', pending: true },
+  { key: 'portal.access_link_days', label: 'AE one-click approval link validity (days)', group: 'Portal', type: 'number', value: 7, rule: 'DBL-CLT-019 (Q-PTL-04)', pending: true },
+  { key: 'fin.credit_term_basis', label: 'Credit term (30 days) counted from', group: 'Finance', type: 'text', value: 'invoice_date', rule: 'DBL-CNC-005 (Q-CNC-03)', pending: true },
+  { key: 'fin.weekly_cycle_start', label: 'Weekly billing week starts on', group: 'Finance', type: 'text', value: 'Friday', rule: 'DBL-FIN-001 (Q-FIN-07)', pending: true },
+  { key: 'res.funded_wallet_rule', label: 'Rescue request — e-wallet needed (“funded e-wallet”, BR-01)', group: 'Rescue', type: 'text', value: 'wallet_exists', rule: 'UC-05 / DBL-CLT-005 (Q-EWL-02)', pending: true },
   { key: 'alo.idle_days_threshold', label: 'Idle unit flag after (days)', group: 'Allocation', type: 'number', value: 30, rule: 'DCIR (TBD)', pending: true },
   { key: 'alo.reg_warn_days', label: 'Warn on Allocate when registration expires within (days); expired = blocked', group: 'Allocation', type: 'number', value: 14, rule: 'DBL-ALO-003 (proposed default — confirm rule)', pending: true },
   { key: 'alo.parkfix_daily_rate', label: 'Park & Fix daily rate (override needs Park & Fix approve permission)', group: 'Allocation', type: 'money', value: 350, rule: 'DBL-ALO-005 (Q-ALO-02)', pending: true },
@@ -106,6 +112,7 @@ export const settingsToMap = (defs: SettingDef[]): SettingsMap => Object.fromEnt
 // Kept separate from DEFAULT_SETTINGS so other modules can add keys freely; settingMeta() fills sensible
 // defaults (unit + whole-number range) from the type/label for keys without an entry here.
 const D = { unit: 'days', integer: true } as const;
+const WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const H = { unit: 'hours', integer: true } as const;
 export const SETTING_META: Record<string, Partial<SettingDef>> = {
   'cnc.hold_threshold_days': { ...D, min: 1, max: 365, sensitive: true, help: 'A client goes On Hold automatically when any balance is older than this many days. Hold status is re-evaluated whenever balances change, so lowering the value can put clients on hold immediately.' },
@@ -141,6 +148,19 @@ export const SETTING_META: Record<string, Partial<SettingDef>> = {
   'clt.pretermination_cap_days': { unit: 'days', integer: true, min: 0, max: 365, decision: 'Q-CLT-PTF', help: 'BR-15 names a pre-termination fee inside the lock-in but not its amount. Proposed: the daily rates of the units on hire for the lock-in days left, capped at this many days.' },
   'portal.client_support_phone': { decision: 'Q-PTL-01' }, 'portal.client_support_email': { decision: 'Q-PTL-01' },
   'portal.vendor_support_phone': { decision: 'Q-PTL-01' }, 'portal.vendor_support_email': { decision: 'Q-PTL-01' }, 'portal.dpo_email': { decision: 'Q-PTL-02' },
+  'portal.registration_extras': { decision: 'Q-PTL-03', options: [
+    { value: 'tin,documents,consent', label: 'TIN, supporting documents and privacy consent (proposed)' }, { value: 'tin,consent', label: 'TIN and consent — documents at accreditation' },
+    { value: 'consent', label: 'Consent only — TIN and documents at accreditation' }],
+    help: 'The Designer Brief lists 8 fields for the external request form. TIN, supporting documents and the Data Privacy consent are extras: switch off any the client does not want at request stage (they are then collected during accreditation). A value typed in an optional field is still format-checked.' },
+  'portal.access_link_days': { ...D, min: 1, max: 30, decision: 'Q-PTL-04', help: 'How long the one-click approval link emailed to the Account Executive stays valid. The link can be used once.' },
+  'fin.credit_term_basis': { decision: 'Q-CNC-03', options: [{ value: 'invoice_date', label: 'Invoice date (shown on the portal today)' }, { value: 'acknowledgment', label: 'Client acknowledgment of receipt (DBL-CNC-005)' }],
+    help: 'The portal and contracts say “30 days from invoice date”; DBL-CNC-005 measures the window from the client’s acknowledgment of receipt. Choose the signed rule — the portal wording follows this setting.' },
+  'fin.weekly_cycle_start': { decision: 'Q-FIN-07', options: WEEK.map((d, i) => ({ value: d, label: `${d} – ${WEEK[(i + 6) % 7]}` })),
+    help: 'Portal invoices run Friday–Thursday; the bill-generation run reviewed earlier used Wednesday–Tuesday. One week is used for every weekly client and for the billing run.' },
+  'res.funded_wallet_rule': { decision: 'Q-EWL-02', options: [
+    { value: 'wallet_exists', label: 'An e-wallet must be open (funded once) — low or negative balance only warns (proposed)' },
+    { value: 'positive', label: 'Balance must be above ₱0' }, { value: 'minimum', label: 'Balance must be at or above the contract minimum' }, { value: 'none', label: 'No e-wallet check' }],
+    help: 'UC-05 / DBL-CLT-005: Allow for Rescue “requires a funded e-wallet”. Finance to confirm what “funded” means; the rescue form and API follow this setting.' },
   'alo.idle_days_threshold': { ...D, min: 1, max: 365 },
 };
 

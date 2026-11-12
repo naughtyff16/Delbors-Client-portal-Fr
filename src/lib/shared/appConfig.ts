@@ -9,7 +9,9 @@ export interface AppConfig { appName?: string; portalUrl?: string; staffUrl?: st
   releaseContacts?: ReleaseContacts }
 export interface ReleaseContacts { client?: { phone?: string; email?: string }; vendor?: { phone?: string; email?: string }; dpoEmail?: string;
   /** Delbros account clients pay into (e-wallet top-ups, invoice payments) — shown on the E-wallet page and the top-up dialog. */
-  payee?: { bank: string; accountName: string; accountNo: string; branch?: string } }
+  payee?: { bank: string; accountName: string; accountNo: string; branch?: string };
+  /** Timeline 2 review: the approved receiving account per billing entity (DBL = Delbros Leasing, NAK = Nakamura, KNX = KNEX). */
+  payees?: Partial<Record<'DBL' | 'NAK' | 'KNX', { bank: string; accountName: string; accountNo: string; branch?: string }>> }
 let cached: Promise<AppConfig> | null = null;
 
 export function loadAppConfig(): Promise<AppConfig> {

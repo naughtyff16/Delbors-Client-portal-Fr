@@ -114,6 +114,8 @@ export interface Contract {
   entitlementByType?: boolean;
   rateHistory?: { version: number; validFrom: string; validTo?: string; reason: string; rates: { equipmentType: string; dailyRate: number }[] }[];
   minBillingDays?: number;
+  /** Timeline 2 review: what happened at the end of the term — renewed, replaced, not renewed, or still to decide (DBL-CLT-011). */
+  renewal?: { state: 'Renewed' | 'Replaced by a new contract' | 'Not renewed' | 'Renewal requested' | 'Decision pending'; date?: string; decidedBy?: string; note?: string; successor?: string };
 }
 /** Portal Contracts review: a renewal, amendment or termination request sent from the portal, with its status. */
 export interface ContractRequest {
@@ -128,6 +130,8 @@ export interface CashBond {
   status: 'Held' | 'Withdrawal Pending' | 'Refunded' | 'Applied';
   withdrawals: { id: string; amount: number; reason: string; refundable: number; workflowId: string; status: string; requestedAt: string; earlyException?: boolean; refund?: { method: string; date: string; reference: string; by: string } }[];
   paymentMethod?: string; receivedBy?: string; notes?: string; receiptFile?: string;
+  /** Timeline 2 review: how a bond on an ended contract was closed — refunded, transferred to the next contract, applied to what was owed, or forfeited. */
+  outcome?: { kind: 'Refunded' | 'Transferred' | 'Applied' | 'Forfeited'; at: string; amount: number; reference: string; note: string; toContractNo?: string };
 }
 
 export interface Chassis {
@@ -235,6 +239,8 @@ export interface RescueRequest {
   problemType?: string;
   /** Portal Rescue review (2026-11-11): free text when the problem type is Other; each status change with its time; who was notified on submission. */
   problemDetail?: string; statusLog?: { status: string; at: string; by?: string }[]; notified?: EwaDelivery[];
+  /** Timeline 2 review: status notices sent to the client (Confirmed, Dispatched with ETA, Completed) with their delivery state. */
+  clientNotices?: (EwaDelivery & { event: string; subject: string })[];
 }
 /** Portal review 1.1 (DBL-CLT-017): client feedback and contract requests (renewal / amendment / termination) sent to the Account Executive. */
 export interface ClientFeedback {
@@ -252,6 +258,8 @@ export interface ReturnRequest {
   requestNo: string; clientCode: string; chassisNo: string; contractNo?: string; originBranchCode: string; returnBranchCode: string;
   preferredDate: string; notes?: string; status: 'Requested' | 'Scheduled' | 'Completed' | 'Cancelled';
   requestedAt: string; requestedBy: string;
+  /** Timeline 2 review: who was told about the request (branch, Account Executive, the client). */
+  notified?: EwaDelivery[];
 }
 export interface RescueCostLine { kind: 'Tire' | 'Part'; partCode: string; description: string; qty: number; unitPrice: number }
 
@@ -343,7 +351,9 @@ export interface EwalletTxn { id: string; clientCode: string; at: string; type: 
 export interface TopupRequest { id: string; clientCode: string; amount: number; proofFileName?: string; status: 'Submitted' | 'Confirmed by Treasury' | 'Posted' | 'Rejected'; submittedAt: string; bankRef?: string; paymentRef?: string;
   receiptNo?: string; confirmedBy?: string; confirmedAt?: string; postedBy?: string; postedAt?: string; txnId?: string; rejectedBy?: string; rejectedAt?: string; rejectReason?: string;
   /** Portal top-up review (2026-11-11): what Treasury needs to match the transfer, the resubmission link and who was told. */
-  transferDate?: string; method?: string; sendingBank?: string; remarks?: string; resubmitOf?: string; notified?: EwaDelivery[] }
+  transferDate?: string; method?: string; sendingBank?: string; remarks?: string; resubmitOf?: string; notified?: EwaDelivery[];
+  /** Timeline 2 review: check details when the client paid by check (number, date, drawee bank). */
+  checkNo?: string; checkDate?: string; checkBank?: string }
 /**
  * Portal invoice review (2026-11-11, proposed — Delbros to confirm scope): the client tells Accounting it has paid an invoice
  * (proof of payment), or disputes an invoice. Neither changes the balance — Accounting verifies and records the receipt or memo.

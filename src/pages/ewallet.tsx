@@ -67,7 +67,8 @@ const LEDGER_TYPES: { type: string; sign: "+" | "−" | "±"; when: string }[] =
 
 /** Delbros's receiving account and the reference to quote (from app-config / settings; demo placeholder until approved). */
 export function PayeeBox({ clientCode, compact }: { clientCode?: string; compact?: boolean }) {
-  const p = api.auth.policy().payee;
+  // Timeline 2 review: the receiving account of the entity that bills this client (Delbros Leasing, Nakamura for Mindanao, KNEX) — proposed, Treasury to confirm.
+  const p = api.auth.payeeFor(clientCode);
   const toast = useToast();
   const ref = clientCode ? topupReference(clientCode) : "";
   const copy = async (text: string, what: string) => {
@@ -95,7 +96,8 @@ export function PayeeBox({ clientCode, compact }: { clientCode?: string; compact
               <button type="button" className="text-brand-600" aria-label="Copy reference" onClick={() => void copy(ref, "Reference")}><Copy className="size-3.5" /></button></dd></div>
         )}
       </dl>
-      {p.isDemo && <p className="mt-1 text-xs text-warning">Demo account details — the approved Delbros account replaces these before release.</p>}
+      <p className="mt-1 text-xs text-muted">Billing entity: {p.entityName} — {p.basis}.</p>
+      {p.isDemo && <p className="mt-1 text-xs text-warning">Demo account details — the approved {p.entityName} account replaces these before release.</p>}
     </div>
   );
 }
@@ -250,12 +252,14 @@ function LowBalanceCard({ w }: { w?: { balance: number; minimumBalance: number }
   const ws = walletStateOf(w);
   return (
     <Card>
-      <CardHeader title="What a low balance affects" description="Proposed rule — Finance to confirm (BR-04)" />
+      <CardHeader title="E-wallet states and what a low balance affects" description="Proposed rule — Finance to confirm (BR-04)" />
       <ul className="space-y-2 text-sm">
-        {(["near", "below", "negative"] as const).map((k) => (
-          <li key={k} className={cn("rounded-md border px-3 py-2", k === ws ? "border-current font-medium" : "border-line", k === ws && (k === "near" ? "bg-warning-bg text-warning" : "bg-danger-bg text-danger"))}>
+        {/* Timeline 2 review: Healthy is listed with the three low-balance states, so all four bands are explained. */}
+        {(["healthy", "near", "below", "negative"] as const).map((k) => (
+          <li key={k} className={cn("rounded-md border px-3 py-2", k === ws ? "border-current font-medium" : "border-line", k === ws && (k === "healthy" ? "bg-success-bg text-success" : k === "near" ? "bg-warning-bg text-warning" : "bg-danger-bg text-danger"))}>
             <span className="block">{WALLET_STATES[k].label} <span className="font-normal text-muted">({w ? WALLET_STATES[k].range(w.minimumBalance) : ""})</span></span>
             <span className="block text-xs font-normal text-ink-2">
+              {k === "healthy" && "Comfortably above the minimum. Nothing to do; charges are deducted as they arise."}
               {k === "near" && "Reminder to top up. EWAs and rescues work as normal."}
               {k === "below" && "Delbros asks for a top-up to the contract minimum. EWAs and rescues are not blocked; rescue charges are still deducted after the rescue."}
               {k === "negative" && "Charges exceeded the balance. Not blocked, but the shortfall is owed: it is collected by top-up and, if still owed when the contract ends, deducted from your cash bond (BR-14)."}
@@ -287,6 +291,20 @@ function BondCard({ bonds, ledger }: { bonds?: Bond[]; ledger?: Ledger }) {
         {bonds.map((b) => {
           const p = b.preview;
           const pendingWd = b.withdrawals.find((x) => x.status === "Pending" || x.status.startsWith("Approved"));
+          // Timeline 2 review: a bond on an ended contract shows how it was closed instead of a refund preview.
+          if (b.outcome) {
+            return (
+              <li key={b.id} className="grid gap-2 py-3 text-sm lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_auto]">
+                <span>
+                  <span className="font-semibold">{formatPhp(b.amount)}</span> · <span className="font-mono">{b.contractNo}</span>
+                  <span className="block text-xs text-muted">Received {formatDate(b.dateReceived)} · {b.receiptRef} · contract {p.contractStatus?.toLowerCase()}</span>
+                </span>
+                <span className="text-xs text-ink-2"><strong>{b.outcome.kind} {formatDate(b.outcome.at)}</strong> · {formatPhp(b.outcome.amount)} · ref <span className="font-mono">{b.outcome.reference}</span><span className="block text-muted">{b.outcome.note}</span></span>
+                <span className="flex justify-end"><Badge tone="neutral">{b.status}</Badge></span>
+              </li>
+            );
+          }
+          const wf = pendingWd ? b.workflows.find((x) => x?.id === pendingWd.workflowId) : undefined;
           return (
             <li key={b.id} className="grid gap-3 py-3 text-sm lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_auto]">
               <span>
@@ -303,7 +321,9 @@ function BondCard({ bonds, ledger }: { bonds?: Bond[]; ledger?: Ledger }) {
                     ["Cash bond", p.bond, ""],
                     ["Unpaid invoices (all unpaid, not only overdue)", -p.unpaid, ""],
                     ["Negative e-wallet balance", -p.negativeWallet, ""],
-                    ["Debit memos awaiting approval", -p.openDm, ""],
+                    ["Debit memos awaiting approval", -p.pendingDm, ""],
+                    // Timeline 2 review: a debit memo posted but not yet settled (DM-000039) is also owed.
+                    ["Debit memos posted, not yet settled", -p.postedUnsettledDm, p.unsettledMemos.length ? p.unsettledMemos.join(", ") : ""],
                     ["Pre-termination fee (BR-15)", 0, "only if the contract is ended inside its lock-in"],
                   ] as [string, number, string][]).map(([l, v, note]) => (
                     <tr key={l}>
@@ -330,13 +350,27 @@ function BondCard({ bonds, ledger }: { bonds?: Bond[]; ledger?: Ledger }) {
                   <span className="max-w-56 text-right text-xs text-muted">{formatPhp(pendingWd.amount)} requested {formatDate(pendingWd.requestedAt)} · {pendingWd.status}</span>
                 ) : null}
               </span>
+              {/* Timeline 2 review: where the withdrawal is — the four approvals, then the refund recorded by Accounting. */}
+              {pendingWd && wf && (
+                <ol className="flex flex-wrap gap-1 text-[11px] lg:col-span-3" aria-label="Withdrawal approval steps">
+                  {wf.steps.map((s, i) => (
+                    <li key={s.label} className={cn("rounded-full border px-2 py-0.5", s.decision === "Approved" ? "border-success-line bg-success-bg text-success" : s.decision === "Rejected" ? "border-danger-line bg-danger-bg text-danger" : i === wf.currentStep && wf.status === "Pending" ? "border-warning-line bg-warning-bg text-warning" : "border-line text-muted")}>
+                      {i + 1}. {s.label}{s.decision === "Approved" ? ` ✓ ${formatDate(s.decidedAt)}` : s.decision === "Rejected" ? " — rejected" : i === wf.currentStep && wf.status === "Pending" ? " — reviewing" : ""}
+                    </li>
+                  ))}
+                  <li className={cn("rounded-full border px-2 py-0.5", pendingWd.status === "Refunded" ? "border-success-line bg-success-bg text-success" : "border-line text-muted")}>
+                    Refund {pendingWd.refund ? `paid ${formatDate(pendingWd.refund.date)} · ${pendingWd.refund.method} · ${pendingWd.refund.reference}` : pendingWd.status.startsWith("Approved") ? "— Accounting to pay" : "after the approvals"}
+                  </li>
+                </ol>
+              )}
             </li>
           );
         })}
       </ul>
       <p className="mt-2 text-xs text-muted">
         Refund rule (proposed — Finance to confirm, BR-14): everything you owe when the bond is released is deducted — all unpaid invoices
-        (not only overdue ones, since all fall due by contract end), a negative e-wallet balance and debit memos awaiting approval. The BR-15
+        (not only overdue ones, since all fall due by contract end), a negative e-wallet balance, debit memos awaiting approval and debit memos
+        posted but not yet settled. The BR-15
         pre-termination fee is deducted only when a contract is ended inside its lock-in. Bond history is in the ledger below (Cash bond tab).
         {ledger && ledger.bond.entries.length === 0 ? " No bond entries yet." : ""}
       </p>
@@ -404,6 +438,7 @@ function TopupRequestsCard({ list, onResubmit }: { list?: Topup[]; onResubmit: (
                       Sent {formatDateTime(x.submittedAt)}{x.transferDate ? ` · transferred ${formatDate(x.transferDate)}` : ""}{x.method ? ` · ${x.method}` : ""}
                       {x.paymentRef ? <> · ref <span className="font-mono">{x.paymentRef}</span></> : null}
                       {x.resubmitOf ? ` · resubmission of ${x.resubmitOf}` : ""}
+                      {x.checkNo ? ` · check ${x.checkNo} (${x.checkBank}, dated ${formatDate(x.checkDate)})` : ""}
                     </span>
                   </span>
                   <span className="flex items-center gap-2">
@@ -416,7 +451,7 @@ function TopupRequestsCard({ list, onResubmit }: { list?: Topup[]; onResubmit: (
                   <ol className="mt-1.5 flex flex-wrap gap-1 text-[11px]">
                     {TOPUP_STEPS.map((s, i) => (
                       <li key={s} className={cn("rounded-full border px-2 py-0.5", i <= step ? "border-brand-300 bg-brand-50 text-brand-800" : "border-line text-muted")}>
-                        {s}{i === 1 && x.confirmedAt ? ` · ${formatDate(x.confirmedAt)}` : ""}{i === 2 && x.postedAt ? ` · ${formatDate(x.postedAt)}${x.receiptNo ? ` · ${x.receiptNo}` : ""}` : ""}
+                        {s}{i === 0 && step === 0 ? " — pending Treasury confirmation" : ""}{i === 1 && x.confirmedAt ? ` · ${formatDate(x.confirmedAt)}` : ""}{i === 2 && x.postedAt ? ` · ${formatDate(x.postedAt)}${x.receiptNo ? ` · ${x.receiptNo}` : ""}` : ""}
                       </li>
                     ))}
                   </ol>
@@ -446,7 +481,7 @@ function TopupRequestsCard({ list, onResubmit }: { list?: Topup[]; onResubmit: (
 /** Request e-wallet top-up: what Treasury needs to match the transfer, rules, suggested amounts, and the confirmation. */
 function TopupDialog({ open, resubmit, ledger, clientCode, onClose }: { open: boolean; resubmit?: Topup; ledger?: Ledger; clientCode?: string; onClose: () => void }) {
   const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
-  const blank = { amount: 0, transferDate: today, method: "", sendingBank: "", reference: "", file: "", sizeMb: 0, remarks: "" };
+  const blank = { amount: 0, transferDate: today, method: "", sendingBank: "", reference: "", file: "", sizeMb: 0, remarks: "", checkNo: "", checkDate: "", checkBank: "" };
   const [v, setV] = useState(blank);
   const [tried, setTried] = useState(false);
   const [done, setDone] = useState<Awaited<ReturnType<typeof api.ewallet.requestTopup>> | null>(null);
@@ -459,10 +494,13 @@ function TopupDialog({ open, resubmit, ledger, clientCode, onClose }: { open: bo
     setV(resubmit ? { ...blank, amount: resubmit.amount, method: resubmit.method ?? "", sendingBank: resubmit.sendingBank ?? "", transferDate: resubmit.transferDate ?? today, remarks: `Resubmission of ${resubmit.id}` } : blank);
   }
   const req = useAction(
-    () => api.ewallet.requestTopup({ amount: v.amount, transferDate: v.transferDate, method: v.method, sendingBank: v.sendingBank, reference: v.reference, proofFileName: v.file, proofSizeMb: v.sizeMb, remarks: v.remarks, resubmitOf: resubmit?.id }),
+    () => api.ewallet.requestTopup({ amount: v.amount, transferDate: v.transferDate, method: v.method, sendingBank: v.sendingBank, reference: v.reference, proofFileName: v.file, proofSizeMb: v.sizeMb, remarks: v.remarks, resubmitOf: resubmit?.id,
+      ...(byCheck ? { checkNo: v.checkNo, checkDate: v.checkDate, checkBank: v.checkBank } : {}) }),
     { onSuccess: (t) => setDone(t) },
   );
   const w = ledger?.wallet;
+  // Timeline 2 review (Screen Inventory, PR entry): a check payment needs the check number, date and drawee bank.
+  const byCheck = /\bcheck\b/i.test(v.method);
   const fieldErr = (f: string) => (req.error as { fields?: Record<string, string> } | null)?.fields?.[f];
   const minDate = new Date(Date.now() + 8 * 3_600_000 - TOPUP_RULES.maxAgeDays * 86_400_000).toISOString().slice(0, 10);
   const amountErr = !(v.amount > 0) ? "Enter the amount you paid" : v.amount < TOPUP_RULES.min ? `At least ${formatPhp(TOPUP_RULES.min)}` : v.amount > TOPUP_RULES.max ? `At most ${formatPhp(TOPUP_RULES.max)} per request` : undefined;
@@ -472,9 +510,10 @@ function TopupDialog({ open, resubmit, ledger, clientCode, onClose }: { open: bo
     ["To leave amber (healthy)", Math.max(0, w.minimumBalance * WALLET_NEAR_FACTOR - w.balance)],
     ["To reach the minimum", Math.max(0, w.minimumBalance - w.balance)],
   ] as [string, number][]).filter(([, a], i, all) => a > 0 && all.findIndex(([, b]) => b === a) === i) : [];
+  const checkOk = !byCheck || (v.checkNo.trim() && v.checkDate && v.checkBank.trim());
   const submit = () => {
     setTried(true);
-    if (!amountErr && !fileErr && v.method && v.reference.trim() && v.transferDate && v.remarks.length <= 200) req.mutate(undefined);
+    if (!amountErr && !fileErr && v.method && v.reference.trim() && v.transferDate && v.remarks.length <= 200 && checkOk) req.mutate(undefined);
   };
   return (
     <Modal
@@ -490,16 +529,17 @@ function TopupDialog({ open, resubmit, ledger, clientCode, onClose }: { open: bo
           <div className="rounded-lg border border-brand-100 bg-brand-50 p-4 text-center">
             <CheckCircle2 className="mx-auto mb-1 size-6 text-success" aria-hidden />
             <p className="font-mono text-2xl font-bold text-brand-800">{done.id}</p>
-            <p className="text-sm text-ink-2">{formatPhp(done.amount)} · status <strong>Submitted</strong></p>
+            <p className="text-sm text-ink-2">{formatPhp(done.amount)} to your <strong>e-wallet</strong> · status <strong>Pending Treasury confirmation</strong></p>
+            {done.checkNo && <p className="text-xs text-muted">Check {done.checkNo} · {done.checkBank} · dated {formatDate(done.checkDate)}</p>}
           </div>
-          <Banner tone="info">Treasury will confirm the credit in the Delbros account (usually within 1 working day) and post it to your e-wallet with an Official Receipt. You will be notified; the request is listed under Top-up requests.</Banner>
+          <Banner tone="info">Treasury will confirm the credit in the Delbros account (usually within 1 working day{done.checkNo ? "; a check counts once it clears" : ""}) and post it to your e-wallet with an Official Receipt. You will be notified; the request is listed under Top-up requests.</Banner>
           <div>
             <p className="mb-1 text-xs font-medium text-muted">Notified</p>
             <ul className="divide-y divide-line rounded-lg border border-line text-sm">
               {done.notified?.map((d, i) => (
                 <li key={i} className="flex flex-wrap justify-between gap-2 px-3 py-2">
                   <span>{d.recipient}<span className="block text-xs text-muted">{d.channel} · {d.to}</span></span>
-                  <Badge tone="success">{d.status}</Badge>
+                  <Badge tone={d.status === "Sent" ? "success" : d.status === "Queued" ? "warning" : "danger"}>{d.status === "Queued" ? "Queued for sending" : d.status}</Badge>
                 </li>
               ))}
             </ul>
@@ -508,15 +548,22 @@ function TopupDialog({ open, resubmit, ledger, clientCode, onClose }: { open: bo
       ) : (
         <Stack>
           {resubmit && <Banner tone="warning" title={`${resubmit.id} was rejected`}>{resubmit.rejectReason} Correct the details below — use the reference shown on your bank confirmation.</Banner>}
+          {/* Timeline 2 review: the fund is named — this request tops up the e-wallet only; the cash bond has its own route (proposed). */}
+          <p className="rounded-lg border border-line px-3 py-2 text-sm">
+            <span className="text-xs text-muted">Fund</span> <strong>E-wallet</strong> — for rescue, repair and debit-memo charges.
+            <span className="block text-xs text-muted">This form does not add to your cash bond. The bond amount is set in your contract; to add to it, ask your Account Executive — Treasury issues an Official Receipt to the bond (proposed route, Delbros to confirm).</span>
+          </p>
           <PayeeBox clientCode={clientCode} compact />
           {w && (
             <div className="rounded-lg border border-line bg-surface-alt px-3 py-2 text-sm text-ink-2">
               Current balance <MoneyText value={w.balance} /> · minimum {formatPhp(w.minimumBalance)}
+              {/* Timeline 2 review: say so when no top-up is needed (the chip fills the Amount when clicked). */}
+              {!suggestions.length && <span className="mt-1 block text-xs text-success">Your balance is Healthy — no top-up is needed. You can still top up any amount from {formatPhp(TOPUP_RULES.min)}.</span>}
               {!!suggestions.length && (
                 <span className="mt-1 flex flex-wrap items-center gap-1.5">
                   <span className="text-xs text-muted">Suggested:</span>
                   {suggestions.map(([l, a]) => (
-                    <button key={l} type="button" className="rounded-full border border-brand-300 bg-surface px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-50" onClick={() => setV({ ...v, amount: Math.round(a * 100) / 100 })}>
+                    <button key={l} type="button" title="Fills the Amount field" aria-pressed={v.amount === Math.round(a * 100) / 100} className={cn("rounded-full border border-brand-300 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-50", v.amount === Math.round(a * 100) / 100 ? "bg-brand-50" : "bg-surface")} onClick={() => setV({ ...v, amount: Math.round(a * 100) / 100 })}>
                       {formatPhp(a)} — {l.toLowerCase()}
                     </button>
                   ))}
@@ -535,6 +582,17 @@ function TopupDialog({ open, resubmit, ledger, clientCode, onClose }: { open: bo
             <Input label="Sending bank (optional)" value={v.sendingBank} onChange={(e) => setV({ ...v, sendingBank: e.target.value })} placeholder="The bank you paid from" />
             <Input label="Bank / payment reference no." required value={v.reference} onChange={(e) => setV({ ...v, reference: e.target.value })}
               error={(tried && !v.reference.trim() ? "Required" : undefined) ?? fieldErr("reference")} placeholder="e.g. TRX-20261110-0001" hint="As shown on your bank confirmation" />
+            {byCheck && (
+              <>
+                <Input label="Check number" required value={v.checkNo} onChange={(e) => setV({ ...v, checkNo: e.target.value })}
+                  error={(tried && !v.checkNo.trim() ? "Check number is required" : undefined) ?? fieldErr("checkNo")} placeholder="e.g. 0081234" />
+                <Field label="Check date" required error={(tried && !v.checkDate ? "Check date is required" : undefined) ?? fieldErr("checkDate")} hint="A post-dated check counts once it clears">
+                  {(id, d) => <DatePicker id={id} aria-describedby={d} value={v.checkDate} onChange={(x) => setV({ ...v, checkDate: x })} />}
+                </Field>
+                <Input label="Drawee bank" required value={v.checkBank} onChange={(e) => setV({ ...v, checkBank: e.target.value })}
+                  error={(tried && !v.checkBank.trim() ? "Drawee bank is required" : undefined) ?? fieldErr("checkBank")} placeholder="The bank the check is drawn on" />
+              </>
+            )}
           </FormGrid>
           <Field label="Proof of payment" required error={(tried ? fileErr : undefined) ?? fieldErr("proofFileName")} hint={`One file — PDF, JPG or PNG, max ${TOPUP_RULES.maxFileMb} MB`}>
             {(id, d) => (

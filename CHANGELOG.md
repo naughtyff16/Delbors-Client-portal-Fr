@@ -4,6 +4,23 @@ Temporary log of the correction and UI/UX work, newest first, so the team can fo
 The same entries open from the sticky “Change log” button (bottom-right) on both sign-in pages while `app-config.json` has `"showChangeLog": true`.
 Source of truth: `src/lib/shared/changelog.ts` — regenerate this file with `node scripts/changelog-md.mjs`.
 
+## 12-Nov-2026
+
+### Client portal — Timeline 2 review: the 50 open points (1st and 2nd half) `Feature`
+
+**Why:** The Timeline 2 review listed 50 points across registration, dashboard, EWA, rescue, invoices / SOA, e-wallet & bond and contracts — Not met, Not verified, Needs cross-check or Needs confirmation.
+
+- Registration: the result shows the PAR- reference with “Pending AE approval”, the company code and the notices sent. The Account Executive gets a single-use, expiring one-click link to approve (entering the billing name; the company code is system-generated) or deny with a reason; the applicant is emailed either way and can check the status with the reference and email. TIN, documents and consent stay required but are switchable (portal.registration_extras, Q-PTL-03).
+- Dashboard: one under-rescue rule — every open rescue (Requested to In progress) tags the unit with its RSC- number and blocks Request return (API too). Proposed entry points: Pay now (opens the proof-of-payment form) and Cancel EWA in the history. Request return now shows its RTN- result and who was told.
+- EWA: the Audit log matches EU-000765 (created by the client, cancelled two hours later by the Cavite branch user BG.CAV; a Manila user can no longer cancel a Cavite EWA). EU-000770 is a live pending extension (manager approved, awaiting IT revalidation). Gate passes are renumbered in date order within each branch (the Manila cross-branch return is now MNL0881, the MNL return MNL0882). “License” spelling on New EWA, details and Gate Out. The copy button is labelled “EU no.” with a tooltip. Fixed: valid-until could be 1 ms short of 24 hours.
+- Rescue: the details show the before / after photos, on-site assessment and the client acknowledgment; the client gets in-app + email notices at Confirmed, Dispatched (crew, vehicle, driver, ETA) and Completed, listed with their delivery state. Search and a status filter on My rescue requests; RSC-000043 (Verified) and RSC-000044 (Confirmed) are safe test records. RSC-000040: requested, then cancelled by the client, with matching Audit log rows. The “funded e-wallet” rule is a setting (res.funded_wallet_rule, proposed: an e-wallet must be open; a low balance only warns); new demo account ops@metrocontainer.ph shows the below-minimum warning.
+- Invoices & SOA: ABC’s weekly invoices are rebuilt from the actual hire lines (each unit billed for its days inside the week at its own contract rate; no repeated or non-entitled units). Bill type, contract and units on every row with bill-type and invoice-date filters. The statement always opens with a balance brought forward, and can be downloaded (CSV), saved as PDF or sent to the user’s email. A “Not on this statement” box lists DM-000039 and the e-wallet. The credit-term wording and the weekly cycle follow two new pending settings.
+- E-wallet & bond: check number, date and drawee bank when paying by check; the result says “Pending Treasury confirmation” and the notices are Queued (the mock no longer claims delivery). Fund type named (e-wallet only) with the proposed cash-bond route; pay-to account per billing entity (app-config releaseContacts.payees). The refund breakdown counts posted, unsettled debit memos (DM-000039); a pending withdrawal shows its four approval steps and the refund. Healthy is listed with the other bands. Receipts renumbered in date order (OR-MNL-00000290 → 00000302, 00000299 → 00000303, 00000305 → 00000319).
+- Contracts: payment method, client signatory, region, the deferred-check penalty and an indemnity / loss column; every covered branch is listed (Navotas with zeros); the Spot List shows “terminated” with no contractual expiry; renewal state and cash bond outcome on the expired and terminated contracts (QLP bond refunded, SPL bond applied to its final bill).
+- Mock DB version 20: saved demo data reloads once. 2 + 11 new unit tests; 125 tests pass.
+
+**Result:** All 50 points have a build, a data fix or a stated decision. Amounts changed by the invoice rebuild (12-Nov-2026): ABC unpaid ₱81,409.00 on every screen (was ₱125,320); INV-MNL-00001101 ₱25,480 (CM-000010 ₱455), 00001102 ₱30,968, 00001119 ₱40,376; New EWA “3 of 10 units” (EU-000770 pending). Decisions for Delbros: the items marked proposed or pending in the Timeline 2 results.
+
 ## 11-Nov-2026
 
 ### Portal Contracts — the items marked “Not met” in the Contracts review `Feature`

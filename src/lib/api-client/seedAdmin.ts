@@ -114,10 +114,10 @@ export function applyAdminSeed(db: Db) {
     ev(18, 'AE.JREYES', 'ACCOUNT_EXECUTIVE', 'client.updated', 'client', 'C-00123', { before: { phone: '+63 2 8123 4567' }, after: { phone: '+63 2 8123 9999' } }),
     ev(17, 'APS', 'APS_MANAGER', 'masterdata.vendor.created', 'vendor', 'V-003', { after: { name: 'Roadside Rescue Partners', category: 'Rescue partner' } }),
     ev(16, 'APS', 'APS_MANAGER', 'masterdata.vendor.deactivated', 'vendor', 'V-004', { before: { status: 'Active' }, after: { status: 'Inactive' }, reason: 'No transactions since 2024 — deactivated by APS (soft delete; record kept)' }),
-    ev(58 / 24, 'BG.MNL', 'BRANCH_GENERALIST', 'ewa.cancelled', 'ewa', 'EU-000765', { before: { status: 'Active' }, after: { status: 'Cancelled' }, reason: 'Client cancelled the pickup — trucker unavailable', source: 'Web (internal) · Android tablet (gate)' }),
+    // Timeline 2 review: EU-000765 (created / cancelled by BG.CAV) and RSC-000040 (requested / cancelled by the client) are seeded with the records
+    // themselves (seed.ts), so the sample no longer carries a second, conflicting row for them; the RSC-000039 "cancel" row was removed (it is Dispatched).
     ev(10, 'CNC.OFF1', 'CNC_OFFICER', 'collection.advanced', 'client', 'C-00188', { before: { stage: 'SOA Sent' }, after: { stage: '1st Reminder' }, reason: 'Ladder day 5 — no payment received' }),
     ev(7, 'FINMGR', 'FINANCE_MANAGER', 'workflow.approved', 'client', 'C-00244', { after: { workflow: 'WF-ACC-1', step: 'Finance endorsement' }, reason: 'Financials acceptable' }),
-    ev(6, 'OPSMGR', 'OPS_MANAGER', 'rescue.cancel', 'rescue', 'RSC-000039', { before: { status: 'Verified' }, after: { status: 'Cancelled' }, reason: 'Client fixed the tire on site; no dispatch needed' }),
     ev(5, 'CNC.MGR', 'CNC_MANAGER', 'audit.export', 'audit', 'audit-log.csv', { after: { rows: 42, filter: { entityType: 'client' } }, reason: 'Monthly C&C control review' }),
     ev(3, 'BG.CEB', 'BRANCH_GENERALIST', 'auth.login_failed', 'user', 'BG.CEB', { source: 'Web (internal) · 112.198.0.14' }),
   ];

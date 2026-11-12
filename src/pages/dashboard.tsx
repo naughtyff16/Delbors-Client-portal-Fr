@@ -126,6 +126,10 @@ export function ClientDashboard() {
               ) : x.unpaidCount ? (
                 " · none overdue"
               ) : null}
+              {/* Timeline 2 review (proposed entry point): Pay now opens the oldest unpaid invoice with the proof-of-payment form. */}
+              {x.oldestDueInvoices[0] && (
+                <> · <Link to={`/client/invoices?open=${x.oldestDueInvoices[0]}&pay=1`} className={linkCls}>Pay now</Link></>
+              )}
             </>
           }
           tone={x.overdue > 0 ? "danger" : "default"}
@@ -344,7 +348,12 @@ function OnHireCard({ x, eqName, onReturn }: { x: Dash; eqName: (c?: string) => 
               <li key={u.chassisNo} className={cn("flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5 lg:grid lg:gap-3", cols)}>
                 <span className="min-w-0 basis-full lg:basis-auto">
                   <span className="font-mono">{u.chassisNo}</span> <span className="text-muted">· {eqName(u.chassisType)}</span>
-                  {u.status === "Rescue" && <Badge tone="warning" className="ml-2">Under rescue</Badge>}
+                  {/* Timeline 2 review: one rule — every open rescue (Requested to In progress) tags the unit and blocks Request return. */}
+                  {u.rescue && (
+                    <Link to={`/client/rescue?open=${u.rescue.rescueNo}`} className="ml-2 inline-flex" title={`${u.rescue.rescueNo} · ${u.rescue.detail}`}>
+                      <Badge tone="warning">{u.rescue.label} · {u.rescue.rescueNo} {u.rescue.status.toLowerCase()}</Badge>
+                    </Link>
+                  )}
                 </span>
                 <span><span className="text-muted lg:hidden">Contract </span><Link to="/client/contracts" className="font-mono text-[13px] hover:underline">{u.contractNo ?? "—"}</Link></span>
                 <span className="tabular lg:text-right"><span className="text-muted lg:hidden">Rate </span>{u.dailyRate != null ? `${formatPhp(u.dailyRate)}/day` : "—"}</span>
@@ -359,8 +368,10 @@ function OnHireCard({ x, eqName, onReturn }: { x: Dash; eqName: (c?: string) => 
                     </span>
                   ) : u.canRequestReturn ? (
                     <Button size="sm" variant="secondary" onClick={() => onReturn(u)}>Request return</Button>
+                  ) : u.rescue ? (
+                    <span className="text-xs text-muted" title="Request return is available once the rescue is completed or cancelled">After the rescue</span>
                   ) : (
-                    <span className="text-xs text-muted">After the rescue</span>
+                    <span className="text-xs text-muted">Not available</span>
                   )}
                 </span>
               </li>
@@ -368,7 +379,8 @@ function OnHireCard({ x, eqName, onReturn }: { x: Dash; eqName: (c?: string) => 
           </ul>
           <p className="mt-3 border-t border-line pt-3 text-xs text-muted">
             Accrued = days on hire × contract daily rate, before 12% VAT. Days count from the Gate Out day (the pickup day counts). The part already
-            billed is in Unpaid bills; the rest goes on your next {x.client.billingCycle.toLowerCase()} invoice.
+            billed is in Unpaid bills; the rest goes on your next {x.client.billingCycle.toLowerCase()} invoice. A unit with an open rescue request
+            (from Requested until Completed) shows “Under rescue” and is returned after the rescue.
           </p>
         </div>
       ) : (
@@ -391,10 +403,36 @@ function ReturnRequestModal({ unit, x, eqName, branchName, onClose }: { unit: On
     setV({ ...blank, branch: unit?.branchCode ?? "" });
     setTried(false);
   }
+  // Timeline 2 review: the result says what the request created (RTN- reference), who received it, and what happens next.
+  const [done, setDone] = useState<Awaited<ReturnType<typeof api.portal.requestReturn>> | null>(null);
   const send = useAction(
     () => api.portal.requestReturn({ chassisNo: unit!.chassisNo, returnBranchCode: v.branch, preferredDate: v.date, notes: v.notes }),
-    { success: (r) => `${r.requestNo} sent — the branch will confirm the return date`, onSuccess: onClose },
+    { onSuccess: (r) => setDone(r) },
   );
+  if (done) {
+    return (
+      <Modal open onClose={() => { setDone(null); onClose(); }} title={`Return requested — ${done.requestNo}`} footer={<Button onClick={() => { setDone(null); onClose(); }}>Done</Button>}>
+        <Stack>
+          <Banner tone="success" title={`${done.chassisNo} · return at ${branchName(done.returnBranchCode)} on ${formatDate(done.preferredDate)}`}>
+            This is a request, not a booking: the branch confirms the Gate In date with you, and the unit shows “Return requested” until it is returned.
+            Charges continue until the Gate In day.{done.crossBranch ? " Returning at another branch needs Delbros IT's cross-branch approval code (BR-16) — Delbros arranges it." : ""}
+          </Banner>
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted">Sent to</p>
+            <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+              {done.notified.map((n, i) => (
+                <li key={i} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                  <span>{n.recipient}<span className="block text-xs text-muted">{n.channel} · {n.to}</span></span>
+                  <Badge tone={n.status === "Queued" ? "warning" : n.status === "Failed" ? "danger" : "success"}>{n.status === "Queued" ? "Queued for sending" : n.status}</Badge>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <p className="text-xs text-muted">Proposed workflow (Delbros to confirm, Q-PTL-03): Requested → Scheduled by the branch → Completed at Gate In.</p>
+        </Stack>
+      </Modal>
+    );
+  }
   if (!unit) return null;
   const options = [...x.returnBranches];
   if (!options.some((b) => b.code === unit.branchCode)) options.unshift({ code: unit.branchCode, name: branchName(unit.branchCode) });
@@ -698,7 +736,13 @@ function EwaHistoryCard({ x, eqName }: { x: Dash; eqName: (c?: string) => string
                 <span className="min-w-0 truncate text-ink-2">{e.units.map((u) => `${eqName(u.equipmentType)}${u.qty > 1 ? ` × ${u.qty}` : ""}`).join(", ")}</span>
                 <span className="text-muted max-lg:hidden">{formatDateTime(e.createdAt)}</span>
                 <span className="text-muted"><span className="lg:hidden">Valid until </span>{formatDateTime(e.validUntil)}</span>
-                <span className="max-lg:ml-auto"><PortalStatus domain="ewa" value={e.status} /></span>
+                <span className="max-lg:ml-auto">
+                  {e.status === "Extension Pending" ? <Badge tone="warning">Extension requested</Badge> : <PortalStatus domain="ewa" value={e.status} />}
+                  {/* Timeline 2 review (proposed entry point): cancel an Active EWA before any release — opens the same dialog as the EWA page. */}
+                  {e.status === "Active" && e.units.every((u) => u.usedChassis.length === 0) && (
+                    <Link to={`/client/ewa?open=${e.euNo}&cancel=1`} className="mt-0.5 block text-xs font-medium text-danger hover:underline">Cancel EWA</Link>
+                  )}
+                </span>
                 {e.status === "Cancelled" && (
                   <span className="basis-full text-xs text-muted lg:col-span-6 lg:col-start-2">
                     Cancelled {formatDateTime(e.cancelledAt)}: <span className="text-ink-2">{e.cancelReason ?? "No reason recorded."}</span>

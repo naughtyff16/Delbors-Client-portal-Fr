@@ -6,6 +6,7 @@ import {
   type Invoice, type JobOrder, type NotificationRule, type RepairCategory, type RescueRequest, type RoleCode, type StockTxnType, type User,
   type ClientInternalForm, type ClientPortalForm, type RescueRequestForm, type PaymentStatus, type AgingBuckets,
   type EwalletCategory, type EwalletTxn, type TopupRequest, TOPUP_RULES, nextCollectionStage, MIN_BILLING_DAYS, preTerminationFee, renewalNoticeDates, hireDays, RESCUE_PROBLEM_TYPES, RESCUE_PROBLEM_OTHER, PLATE_RE, LICENCE_RE, type Ewa, type EwaDelivery,
+  rescueUnitState, rescueWalletGate, weeklyCycle, type GateResult,
 } from '../shared';
 import {
   ApiError, audit, canActOn, db, decide, delay, inScope, me, nextNo, notify, onWorkflowDone, persist, requirePerm, session, setSession,
@@ -19,8 +20,8 @@ import { addDays, DEFAULT_SETTINGS, settingMeta, validateSetting, type RateCardR
 import { auditHash } from './core';
 // ── Portal sign-in (client & vendor) ──
 import {
-  checkResetToken, creditContact, demoResetToken, demoSignInCode, expireSession, portalPolicy, portalSignIn, requestPasswordReset, requestPortalAccess,
-  resendSignInCode, resetPassword, verifySignInCode, type PortalRealm,
+  accessRequestStatus, checkApprovalLink, checkResetToken, creditContact, decidePortalAccess, demoResetToken, demoSignInCode, expireSession, payeeFor, portalPolicy, portalSignIn,
+  requestPasswordReset, requestPortalAccess, resendSignInCode, resetPassword, verifySignInCode, type PortalRealm,
 } from './portalAuth';
 import { applyAdminSeed } from './seedAdmin';
 export type MasterKind = 'branch' | 'equipmentType' | 'part' | 'vendor' | 'warehouse' | 'list';
@@ -84,12 +85,12 @@ export function ewaEntitlement(ct: Contract) {
 }
 /**
  * GAT-002 / N08: the full-detail EWA email goes to the client (the portal user who created it and the company email) and to Delbros
- * (the pickup branch's Branch Generalists and the Account Executive). The mock records each send as Sent; the mail service sets the real status.
+ * (the pickup branch's Branch Generalists and the Account Executive). The mock queues each send (Queued); the mail service sets Sent or Failed.
  */
 function ewaDelivery(e: Ewa, c: Client, resend = false): EwaDelivery[] {
   const at = nowIso();
   const out: EwaDelivery[] = [];
-  const add = (audience: EwaDelivery['audience'], recipient: string, to?: string) => { if (to && !out.some((d) => d.to === to)) out.push({ at, channel: 'Email', audience, recipient, to, status: 'Sent', ...(resend ? { resend } : {}) }); };
+  const add = (audience: EwaDelivery['audience'], recipient: string, to?: string) => { if (to && !out.some((d) => d.to === to)) out.push({ at, channel: 'Email', audience, recipient, to, status: 'Queued', ...(resend ? { resend } : {}) }); };
   const creator = db.users.find((x) => x.userId === e.createdBy);
   if (creator?.realm === 'CLIENT_PORTAL') add('Client', creator.name, creator.email);
   add('Client', `${c.clientName} (company email)`, c.email);
@@ -121,7 +122,7 @@ function rescueTimeline(r: RescueRequest) {
  */
 function rescueNotified(r: RescueRequest, c: Client): EwaDelivery[] {
   const at = nowIso(); const out: EwaDelivery[] = [];
-  const add = (audience: EwaDelivery['audience'], recipient: string, to: string | undefined, channel: EwaDelivery['channel'] = 'Email') => { if (to && !out.some((d) => d.to === to && d.channel === channel)) out.push({ at, channel, audience, recipient, to, status: 'Sent' }); };
+  const add = (audience: EwaDelivery['audience'], recipient: string, to: string | undefined, channel: EwaDelivery['channel'] = 'Email') => { if (to && !out.some((d) => d.to === to && d.channel === channel)) out.push({ at, channel, audience, recipient, to, status: 'Queued' }); };
   const internal = (role: string) => db.users.filter((x) => x.realm === 'INTERNAL' && x.status === 'Active' && x.roles.includes(role as RoleCode));
   for (const d of internal('RESCUE_COORDINATOR')) { add('Delbros', `${d.name} — dispatcher`, d.email); if (r.urgent) add('Delbros', `${d.name} — dispatcher`, d.mobile, 'SMS'); }
   for (const x of internal('CNC_OFFICER')) add('Delbros', `${x.name} — Credit & Collection (eligibility check)`, x.email);
@@ -142,6 +143,34 @@ function portalLink(link?: string) {
   if (link.startsWith('/contracts')) return '/client/contracts';
   if (link.startsWith('/gate') || link.startsWith('/ewa')) return id && /^EU-/.test(id) ? `/client/ewa?open=${id}` : '/client/ewa';
   return '/client';
+}
+/**
+ * Timeline 2 review: the portal rescue gate — the credit gate (hold, Allow for Rescue) plus the "funded e-wallet" rule (res.funded_wallet_rule,
+ * proposed: an e-wallet must be open; a low or negative balance only warns). The warning travels with an allowed result.
+ */
+function portalRescueGate(c: Client): GateResult & { warning?: string } {
+  const g = creditGate(c, 'RESCUE_REQUEST', (db.gateOverrides ?? []).filter((o) => o.clientCode === c.clientCode));
+  if (!g.allowed) return g;
+  const w = rescueWalletGate(db.ewallets.find((e) => e.clientCode === c.clientCode), String(S()['res.funded_wallet_rule'] ?? 'wallet_exists'));
+  return w.allowed ? { ...g, warning: w.warning } : { allowed: false, code: w.code, reason: w.reason };
+}
+/**
+ * Timeline 2 review: status notices to the client — Confirmed, Dispatched (with crew and ETA) and Completed (with the charge). Each is an in-app
+ * notification (created here, so Sent) and an email (Queued — the mail service sets the real delivery state). Kept on the request for the client.
+ */
+function noticeRescueClient(r: RescueRequest, event: 'Confirmed' | 'Dispatched' | 'Completed') {
+  const users = db.users.filter((x) => x.realm === 'CLIENT_PORTAL' && x.clientCode === r.clientCode && x.status === 'Active');
+  if (!users.length) return;
+  const subject = event === 'Confirmed' ? `Rescue ${r.rescueNo} confirmed` : event === 'Dispatched' ? `Rescue ${r.rescueNo} dispatched${r.eta ? ` — ETA ${formatDateTime(r.eta)}` : ''}` : `Rescue ${r.rescueNo} completed`;
+  const body = event === 'Confirmed' ? `${r.chassisNo} · Delbros confirmed the rescue; the dispatcher is assigning the crew.`
+    : event === 'Dispatched' ? `${r.chassisNo} · ${[r.crew, r.rescueVehicle, r.driverName && `driver ${r.driverName}${r.driverPhone ? ` ${r.driverPhone}` : ''}`].filter(Boolean).join(' · ')}${r.eta ? ` · ETA ${formatDateTime(r.eta)}` : ''}.`
+      : `${r.chassisNo} · rescue completed${r.total ? ` · charge ₱${r.total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : ''}${r.clientAckName ? ` · acknowledged by ${r.clientAckName}` : ''}.`;
+  const at = nowIso();
+  notify(`rescue.${event.toLowerCase()}.portal`, subject, body, { extraUsers: users.map((x) => x.userId), link: `/client/rescue?open=${r.rescueNo}` });
+  for (const x of users) {
+    (r.clientNotices ??= []).push({ at, event, subject, channel: 'In-app', audience: 'Client', recipient: x.name, to: x.email, status: 'Sent' });
+    r.clientNotices.push({ at, event, subject, channel: 'Email', audience: 'Client', recipient: x.name, to: x.email, status: 'Queued' });
+  }
 }
 const mustClient = (code: string) => { const c = clientOf(code); if (!c) throw new ApiError('NOT_FOUND', `Client ${code} not found.`, 404); return c; };
 const mustChassis = (no: string) => { const c = db.chassis.find((x) => x.chassisNo === no); if (!c) throw new ApiError('NOT_FOUND', `Chassis ${no} not found.`, 404); return c; };
@@ -168,6 +197,15 @@ export function paymentStatus(i: Invoice): PaymentStatus {
 function balance(i: Invoice) { return i.status === 'Cancelled' ? 0 : Math.max(0, round2(i.total - i.amountPaid - (i.credited ?? 0))) + 0; }
 const daysOverdue = (i: Invoice) => Math.max(0, daysBetween(new Date(i.dueDate).toISOString(), nowIso()));
 const rescueIsOpen = (r: RescueRequest) => !['Completed', 'Cancelled', 'Blocked'].includes(r.status);
+const isCheckMethod = (m?: string) => /\bcheck\b/i.test(m ?? '');
+/** Debit memos posted (or approved) but not settled: no live e-wallet deduction for them and not applied to an invoice (Timeline 2: DM-000039). */
+function unsettledDebitMemos(clientCode: string) {
+  return db.memos.filter((m) => {
+    if (m.clientCode !== clientCode || m.type !== 'Debit' || !['Posted', 'Approved'].includes(m.status) || m.appliedTo || m.referenceInvoiceNo) return false;
+    const src = m.rescueNo ?? m.joNo ?? m.referenceId;
+    return !db.ewalletTxns.some((t) => t.clientCode === clientCode && t.type === 'Deduction' && !t.reversedById && (t.referenceId === m.memoNo || (!!src && t.referenceId === src)));
+  });
+}
 function outstandingOf(clientCode: string) {
   return round2(db.invoices.filter((i) => i.clientCode === clientCode && i.status !== 'Draft').reduce((a, i) => a + Math.max(0, balance(i)), 0));
 }
@@ -457,7 +495,7 @@ function clientExtras(c: Client) {
   };
 }
 // SCR-09: bond balance = received less refunded withdrawals.
-const bondBalance = (b: CashBond) => round2(b.amount - b.withdrawals.filter((w) => w.status === 'Refunded').reduce((a, w) => a + w.amount, 0));
+const bondBalance = (b: CashBond) => { const refunded = b.withdrawals.filter((w) => w.status === 'Refunded').reduce((a, w) => a + w.amount, 0); return round2(b.amount - refunded - (b.outcome && !refunded ? b.outcome.amount : 0)); };
 const formatPhpPlain = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // DBL-CLT-010: Active contracts move to Expired on the expiry date (run on read for the demo).
@@ -573,6 +611,14 @@ export const api = {
     demoResetToken: (email: string) => demoResetToken(email),
     checkResetToken: (token: string) => checkResetToken(token),
     resetPassword: (token: string, password: string) => resetPassword(token, password),
+    // ── Timeline 2 review: access request status (applicant) and the reviewer's one-click approval link (DBL-CLT-019) ──
+    accessRequestStatus: (reference: string, email: string) => accessRequestStatus(reference, email),
+    checkApprovalLink: (token: string) => checkApprovalLink(token),
+    decidePortalAccess: (token: string, d: { decision: 'approve' | 'deny'; billingName?: string; reason?: string }) => decidePortalAccess(token, d),
+    /** DEMO ONLY (showDemoLogins): the approval link that was emailed to the reviewer. The real API never returns it to the applicant. */
+    demoApprovalLink: (reference: string) => { const r = (db.accessRequests ?? []).find((x) => x.reference === reference); return r?.approvalToken ? `/access-approval/${r.approvalToken}` : null; },
+    /** Timeline 2 review: the receiving account for this client's billing entity. */
+    payeeFor: (clientCode?: string) => payeeFor(clientCode),
     demoAccounts() {
       return db.users.map((u) => ({ userId: u.userId, name: u.name, designation: u.designation, realm: u.realm, roles: u.roles }));
     },
@@ -1192,11 +1238,16 @@ export const api = {
     refundPreview(bondId: string) {
       const b = db.cashBonds.find((x) => x.id === bondId)!;
       const w = db.ewallets.find((e) => e.clientCode === b.clientCode);
-      const openDm = db.memos.filter((m) => m.clientCode === b.clientCode && m.type === 'Debit' && m.status === 'Pending Approval').reduce((a, m) => a + m.amount, 0);
+      const pendingDm = round2(db.memos.filter((m) => m.clientCode === b.clientCode && m.type === 'Debit' && m.status === 'Pending Approval').reduce((a, m) => a + m.amount, 0));
+      // Timeline 2 review (DM-000039): a debit memo that is posted but not yet settled — not deducted from the e-wallet and not on an invoice — is also owed.
+      const unsettled = unsettledDebitMemos(b.clientCode);
+      const postedUnsettledDm = round2(unsettled.reduce((a, m) => a + m.amount, 0));
+      const openDm = round2(pendingDm + postedUnsettledDm);
       const ct = b.contractNo ? db.contracts.find((x) => x.contractNo === b.contractNo) : undefined;
       const bal = bondBalance(b);
       return {
-        bond: bal, unpaid: outstandingOf(b.clientCode), negativeWallet: w && w.balance < 0 ? -w.balance : 0, openDm, ...cashBondRefundable(bal, outstandingOf(b.clientCode), w && w.balance < 0 ? -w.balance : 0, openDm),
+        bond: bal, unpaid: outstandingOf(b.clientCode), negativeWallet: w && w.balance < 0 ? -w.balance : 0, pendingDm, postedUnsettledDm, unsettledMemos: unsettled.map((m) => m.memoNo), openDm,
+        ...cashBondRefundable(bal, outstandingOf(b.clientCode), w && w.balance < 0 ? -w.balance : 0, openDm),
         contractNo: b.contractNo, contractStatus: ct?.status, contractExpiry: ct?.expiryDate, contractEnded: !ct || ['Expired', 'Terminated', 'Renewed'].includes(ct.status),
       };
     },
@@ -1376,7 +1427,9 @@ export const api = {
             extensions: (e.extensions ?? []).map((x) => ({ ...x, requestedByName: nameOf(x.requestedBy), decidedByName: nameOf(x.decidedBy) })),
             // Review 1.1: gate passes released under this EWA (Gate Pass no., unit, time, truck OR/CR captured at the gate).
             gatePasses: db.gatePasses.filter((g) => g.euNo === e.euNo && g.direction === 'OUT').map((g) => ({ gatePassNo: g.gatePassNo, chassisNo: g.chassisNo, at: g.actualEventAt, truckOrcr: g.truckOrcr })),
-            extension: ext ? { workflowId: ext.id, step: ext.currentStep, stepLabel: ext.steps[ext.currentStep]?.label, canAct: u.realm === 'INTERNAL' && canActOn(ext, u) } : undefined };
+            extension: ext ? { workflowId: ext.id, step: ext.currentStep, stepLabel: ext.steps[ext.currentStep]?.label, canAct: u.realm === 'INTERNAL' && canActOn(ext, u),
+              // Timeline 2 review: approvals already given on the pending request (e.g. manager approved, IT revalidation next).
+              approvals: ext.steps.filter((s) => s.decision === 'Approved').map((s) => ({ label: s.label, by: nameOf(s.decidedBy) ?? s.decidedBy, at: s.decidedAt })) } : undefined };
         }));
     },
     /** EWA detail (DBL-GAT-001/003): linked gate passes, extension history (workflows) and audit trail. */
@@ -1400,7 +1453,7 @@ export const api = {
         if (!e) throw new ApiError('NOT_FOUND', `EWA ${euNo} not found.`, 404);
         if (e.status === 'Cancelled') throw new ApiError('INVALID_STATE', 'Cancelled EWAs cannot be edited.', 409);
         if (leg === 'OUT' && e.status === 'Used') throw new ApiError('INVALID_STATE', 'All units have gone out — edit the inbound leg instead.', 409);
-        if (!cred.driverName.trim() || !cred.driverLicenseNo.trim() || !cred.truckPlateNo.trim()) throw new ApiError('VALIDATION_FAILED', 'Driver name, licence no. and truck plate are required.', 422);
+        if (!cred.driverName.trim() || !cred.driverLicenseNo.trim() || !cred.truckPlateNo.trim()) throw new ApiError('VALIDATION_FAILED', 'Driver name, license no. and truck plate are required.', 422);
         if (!reason.trim()) throw new ApiError('VALIDATION_FAILED', 'A reason is required.', 422, { reason: 'Required' });
         const before = leg === 'OUT' ? { trucker: e.trucker, driverName: e.driverName, driverLicenseNo: e.driverLicenseNo, truckPlateNo: e.truckPlateNo } : e.inbound;
         if (leg === 'OUT') Object.assign(e, cred); else e.inbound = { ...cred };
@@ -1422,11 +1475,11 @@ export const api = {
       // Portal New EWA review: the Screen Inventory error "Missing driver/truck info" when any driver / truck field is blank.
       const clean = { driverName: f.driverName?.trim() ?? '', driverLicenseNo: f.driverLicenseNo?.trim().toUpperCase() ?? '', truckPlateNo: f.truckPlateNo?.trim().toUpperCase().replace(/\s+/g, ' ') ?? '', trucker: f.trucker?.trim() ?? '' };
       const blank = Object.fromEntries(Object.entries(clean).filter(([, v]) => !v).map(([k]) => [k, 'Required']));
-      if (Object.keys(blank).length) throw new ApiError('MISSING_DRIVER_TRUCK_INFO', 'Missing driver/truck info: enter the trucker, truck plate no., driver name and driver licence no.', 422, blank);
+      if (Object.keys(blank).length) throw new ApiError('MISSING_DRIVER_TRUCK_INFO', 'Missing driver/truck info: enter the trucker, truck plate no., driver name and driver license no.', 422, blank);
       const fmt: Record<string, string> = {};
       if (!PLATE_RE.test(clean.truckPlateNo)) fmt.truckPlateNo = 'Use the LTO format, e.g. NAB 5678';
       if (!LICENCE_RE.test(clean.driverLicenseNo)) fmt.driverLicenseNo = 'Use the LTO format, e.g. N01-23-456789';
-      if (Object.keys(fmt).length) throw new ApiError('VALIDATION_FAILED', 'Check the truck plate and driver licence format.', 422, fmt);
+      if (Object.keys(fmt).length) throw new ApiError('VALIDATION_FAILED', 'Check the truck plate and driver license format.', 422, fmt);
       const ct = db.contracts.find((x) => x.contractNo === f.contractNo && x.clientCode === clientCode && x.status === 'Active');
       if (!ct) throw new ApiError('VALIDATION_FAILED', 'Select an active contract for this client.', 422, { contractNo: 'No active contract' });
       const branch = db.branches.find((b) => b.code === f.branchCode);
@@ -1447,12 +1500,14 @@ export const api = {
       }
       const total = f.units.reduce((a, l) => a + l.qty, 0);
       if (total > ent.contractRemaining) throw new ApiError('ENTITLEMENT_EXCEEDED', `Contract ${ct.contractNo} covers ${ent.unitQty} units; ${ent.onHire} are on hire and ${ent.pending} are on open EWAs, so ${ent.contractRemaining} more can be requested.`, 422, { units: `${ent.contractRemaining} left on the contract` });
-      const validUntil = addHours(nowIso(), Number(S()['gat.ewa_validity_hours'] ?? 24));
+      // One clock reading for created and valid-until, so the validity is exactly the configured hours (BR-06).
+      const createdAt = nowIso();
+      const validUntil = addHours(createdAt, Number(S()['gat.ewa_validity_hours'] ?? 24));
       if (f.expectedPickupAt && (Number.isNaN(Date.parse(f.expectedPickupAt)) || f.expectedPickupAt > validUntil || Date.parse(f.expectedPickupAt) < Date.now() - 3_600_000)) throw new ApiError('VALIDATION_FAILED', 'The expected pickup must fall within the EWA validity.', 422, { expectedPickupAt: 'Within the next 24 hours' });
       if ((f.remarks?.length ?? 0) > 300) throw new ApiError('VALIDATION_FAILED', 'Remarks are limited to 300 characters.', 422, { remarks: 'Max 300 characters' });
       const euNo = nextNo('EU', 'EU-', 6);
       const e: Ewa = { euNo, clientCode, contractNo: f.contractNo, branchCode: f.branchCode, ...clean,
-        units: f.units.map((l) => ({ ...l, usedChassis: [] })), createdAt: nowIso(), validUntil, createdVia: (u.realm === 'CLIENT_PORTAL' ? 'Portal' : 'Internal') as 'Portal' | 'Internal', status: 'Active' as const, extensionCount: 0, createdBy: u.userId,
+        units: f.units.map((l) => ({ ...l, usedChassis: [] })), createdAt, validUntil, createdVia: (u.realm === 'CLIENT_PORTAL' ? 'Portal' : 'Internal') as 'Portal' | 'Internal', status: 'Active' as const, extensionCount: 0, createdBy: u.userId,
         truckOrcr: f.truckOrcr?.trim() || undefined, expectedPickupAt: f.expectedPickupAt || undefined, remarks: f.remarks?.trim() || undefined };
       e.delivery = ewaDelivery(e, c);
       db.ewas.unshift(e);
@@ -1495,6 +1550,8 @@ export const api = {
       return tx(() => {
         const e = db.ewas.find((x) => x.euNo === euNo);
         if (!e) throw new ApiError('NOT_FOUND', `EWA ${euNo} not found.`, 404);
+        // Timeline 2 review (EU-000765): only a user of the EWA's pickup branch (or with access to it) may cancel it, so the Audit log names the right branch.
+        if (!inScope(e.branchCode)) throw new ApiError('FORBIDDEN', `${euNo} is a ${e.branchCode} EWA — only ${e.branchCode} branch staff can cancel it.`, 403);
         if (!['Active', 'Partially Used', 'Expired'].includes(e.status)) throw new ApiError('INVALID_STATE', `EWA ${euNo} is ${e.status} and cannot be cancelled.`, 409);
         if (!reason.trim()) throw new ApiError('VALIDATION_FAILED', 'A cancellation reason is required.', 422, { reason: 'Required' });
         const from = e.status;
@@ -1944,8 +2001,9 @@ export const api = {
       const u = me();
       const clientCode = u.realm === 'CLIENT_PORTAL' ? u.clientCode! : f.clientCode!;
       await delay(250);
-      const gate = creditGate(clientOf(clientCode), 'RESCUE_REQUEST');
       const c = mustClient(clientCode);
+      // Portal requests also need a funded e-wallet (Timeline 2 review, res.funded_wallet_rule); staff intake keeps the credit gate only.
+      const gate = u.realm === 'CLIENT_PORTAL' ? portalRescueGate(c) : creditGate(c, 'RESCUE_REQUEST');
       const ch = db.chassis.find((x) => x.chassisNo === f.chassisNo);
       if (u.realm === 'CLIENT_PORTAL') {
         // Portal Rescue review (BR-01): a client on hold (or without rescue service) is told why and who to call — no request is created.
@@ -1981,13 +2039,14 @@ export const api = {
         if (!from[action].includes(r.status)) throw new ApiError('INVALID_STATE', `Cannot ${action} a rescue in ${r.status}.`, 409);
         if (action === 'verify') { const g = creditGate(clientOf(r.clientCode), 'RESCUE_DISPATCH'); if (!g.allowed) { r.status = 'Blocked'; r.blockedReason = g.reason; r.blockedAt = nowIso(); r.notEligibleBy = me().userId; logRescue(r); audit('rescue.blocked', 'rescue', no, undefined, g.reason); persist(); return r; } r.status = 'Verified'; r.verifiedBy = me().userId; }
         if (action === 'not-eligible') { if (!data.reason?.trim()) throw new ApiError('VALIDATION_FAILED', 'Give the reason the client is not eligible.', 422, { reason: 'Required' }); r.status = 'Blocked'; r.blockedReason = `Not eligible (C&C): ${data.reason}`; r.blockedAt = nowIso(); r.notEligibleBy = me().userId; }
-        if (action === 'confirm') { r.status = 'Confirmed'; r.confirmedBy = me().userId; }
+        if (action === 'confirm') { r.status = 'Confirmed'; r.confirmedBy = me().userId; noticeRescueClient(r, 'Confirmed'); }
         if (action === 'dispatch') {
           assertGate(r.clientCode, 'RESCUE_DISPATCH');
           if (!data.crew) throw new ApiError('VALIDATION_FAILED', 'Assign a vendor or crew.', 422, { crew: 'Required' });
           if (!data.rescueVehicle?.trim() || !data.driverName?.trim()) throw new ApiError('VALIDATION_FAILED', 'Record the rescue vehicle and driver (DBL-RES-008).', 422, { rescueVehicle: data.rescueVehicle ? '' : 'Required', driverName: data.driverName ? '' : 'Required' });
           Object.assign(r, { status: 'Dispatched', crew: data.crew, eta: data.eta, rescueVehicle: data.rescueVehicle, driverName: data.driverName, driverPhone: data.driverPhone, dispatchedAt: nowIso() });
-          notify('rescue.dispatched', `Rescue ${r.rescueNo} dispatched`, `${clientName(r.clientCode)} · ${r.chassisNo} · crew ${data.crew}${data.eta ? ` · ETA ${data.eta}` : ''}`, { clientCode: r.clientCode, aeUserId: clientOf(r.clientCode)?.aeAssigned, branchCode: r.branchCode, link: `/rescue/${r.rescueNo}` }); // N41
+          notify('rescue.dispatched', `Rescue ${r.rescueNo} dispatched`, `${clientName(r.clientCode)} · ${r.chassisNo} · crew ${data.crew}${data.eta ? ` · ETA ${data.eta}` : ''}`, { aeUserId: clientOf(r.clientCode)?.aeAssigned, branchCode: r.branchCode, link: `/rescue/${r.rescueNo}` }); // N41 (staff)
+          noticeRescueClient(r, 'Dispatched'); // the client's notice, with crew, vehicle, driver and ETA
           const ch = db.chassis.find((x) => x.chassisNo === r.chassisNo); if (ch && ch.status === 'On Hire') { ch.status = 'Rescue'; ch.statusSince = nowIso(); }
         }
         if (action === 'start') r.status = 'In Progress';
@@ -2026,7 +2085,8 @@ export const api = {
         costLines: cost.costLines, onsiteAssessment: cost.onsiteAssessment, beforePhotos: cost.beforePhotos, afterPhotos: cost.afterPhotos, clientAckName: cost.clientAckName });
       logRescue(r);
       const ch = db.chassis.find((x) => x.chassisNo === r.chassisNo); if (ch && ch.status === 'Rescue') { ch.status = 'On Hire'; ch.statusSince = nowIso(); }
-      notify('rescue.completed', `Rescue completed: ${no}`, `${clientName(r.clientCode)} · total ₱${charge.total.toLocaleString('en-PH')}`, { clientCode: r.clientCode, branchCode: r.branchCode });
+      notify('rescue.completed', `Rescue completed: ${no}`, `${clientName(r.clientCode)} · total ₱${charge.total.toLocaleString('en-PH')}`, { branchCode: r.branchCode });
+      noticeRescueClient(r, 'Completed');
       audit('rescue.completed', 'rescue', no, { ...charge }); persist();
       return { rescue: structuredClone(r), charge };
     },
@@ -2911,6 +2971,13 @@ export const api = {
           // Company details for the printed statement (Admin → System settings → Company); empty until Finance enters them.
           company: { address: String(settings()['co.registered_address'] ?? '').trim(), tin: String(settings()['co.tin'] ?? '').trim(), permit: String(settings()['co.bir_permit'] ?? '').trim(), payeeBank: String(settings()['co.payee_bank'] ?? '').trim() },
           contactEmail: c.ebillingEmail ?? c.email ?? c.contacts.find((x) => x.isPrimary)?.email ?? c.contacts[0]?.email ?? '',
+          // Timeline 2 review (scope pending Finance): what is owed or held but is not on this statement — posted debit memos not yet settled
+          // (e.g. DM-000039) and the e-wallet, which has its own ledger. Listed so the statement reconciles to the wallet ledger.
+          notOnStatement: {
+            unsettledDebitMemos: unsettledDebitMemos(code).map((m) => ({ memoNo: m.memoNo, amount: m.amount, reason: m.reason, createdAt: m.createdAt })),
+            ewalletBalance: db.ewallets.find((e) => e.clientCode === code)?.balance,
+            ewalletDeductions: round2(db.ewalletTxns.filter((t) => t.clientCode === code && t.type === 'Deduction' && !t.reversedById).reduce((a, t) => a - t.amount, 0)),
+          },
         };
       });
     },
@@ -2962,8 +3029,16 @@ export const api = {
         const bonds = db.cashBonds.filter((b) => b.clientCode === code);
         const bondEntries = bonds.flatMap((b) => [
           { id: `${b.id}-R`, at: new Date(b.dateReceived).toISOString(), entry: 'Bond received' as const, amount: b.amount, reference: b.receiptRef, contractNo: b.contractNo, status: b.status },
-          ...b.withdrawals.map((w) => ({ id: w.id, at: w.requestedAt, entry: (w.status.startsWith('Approved') ? 'Bond refunded' : 'Withdrawal requested') as 'Bond refunded' | 'Withdrawal requested', amount: w.status.startsWith('Approved') ? -w.refundable : 0, reference: w.workflowId, contractNo: b.contractNo, status: w.status, reason: w.reason })),
-          ...(b.status === 'Applied' ? [{ id: `${b.id}-A`, at: nowIso(), entry: 'Bond applied' as const, amount: -b.amount, reference: b.receiptRef, contractNo: b.contractNo, status: b.status }] : []),
+          // Timeline 2 review: a refunded withdrawal is a refund entry on its refund date (it was shown as "Withdrawal requested" ₱0).
+          ...b.withdrawals.map((w) => {
+            const paid = w.status === 'Refunded' || w.status.startsWith('Approved');
+            return { id: w.id, at: w.refund?.date ? new Date(w.refund.date).toISOString() : w.requestedAt, entry: (paid ? 'Bond refunded' : 'Withdrawal requested') as 'Bond refunded' | 'Withdrawal requested', amount: paid ? -(w.amount ?? w.refundable) : 0,
+              reference: w.refund?.reference ?? w.workflowId, contractNo: b.contractNo, status: w.status, reason: w.reason };
+          }),
+          // How a bond on an ended contract was closed (refunded, transferred to the next contract, applied, forfeited) — on its own date.
+          ...(b.outcome && !b.withdrawals.some((w) => w.status === 'Refunded') ? [{ id: `${b.id}-O`, at: b.outcome.at, entry: (b.outcome.kind === 'Refunded' ? 'Bond refunded' : b.outcome.kind === 'Transferred' ? 'Bond transferred' : b.outcome.kind === 'Forfeited' ? 'Bond forfeited' : 'Bond applied') as 'Bond refunded' | 'Bond transferred' | 'Bond forfeited' | 'Bond applied',
+            amount: -b.outcome.amount, reference: b.outcome.reference, contractNo: b.contractNo, status: b.status, reason: b.outcome.note }] : []),
+          ...(b.status === 'Applied' && !b.outcome ? [{ id: `${b.id}-A`, at: nowIso(), entry: 'Bond applied' as const, amount: -b.amount, reference: b.receiptRef, contractNo: b.contractNo, status: b.status }] : []),
         ]).sort((a, b) => a.at.localeCompare(b.at));
         let run = 0; const bondLedger = bondEntries.map((e) => { run = round2(run + e.amount); return { ...e, balanceAfter: run }; });
         const notifications = Object.values(db.notifications.filter((n) => n.link === `/ewallet/${code}` || (n.link === `/credit/status?client=${code}`)).reduce((acc, n) => { const k = `${n.at.slice(0, 16)}|${n.title}`; (acc[k] ??= { at: n.at, title: n.title, body: n.body, recipients: [] as string[] }).recipients.push(db.users.find((x) => x.userId === n.userId)?.name ?? n.userId); return acc; }, {} as Record<string, { at: string; title: string; body: string; recipients: string[] }>));
@@ -3023,7 +3098,7 @@ export const api = {
      * Portal top-up review: amount ₱500–₱5,000,000 (TOPUP_RULES) with centavos, transfer date, method and sending bank, reference (no duplicates),
      * one proof file (PDF / JPG / PNG, max 5 MB), optional remarks; a rejected request can be resubmitted. Treasury and the AE are notified.
      */
-    async requestTopup(f: { amount: number; transferDate: string; method: string; sendingBank?: string; reference: string; proofFileName: string; proofSizeMb?: number; remarks?: string; resubmitOf?: string }) {
+    async requestTopup(f: { amount: number; transferDate: string; method: string; sendingBank?: string; reference: string; proofFileName: string; proofSizeMb?: number; remarks?: string; resubmitOf?: string; checkNo?: string; checkDate?: string; checkBank?: string }) {
       const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Portal only', 403);
       await delay();
       return tx(() => {
@@ -3042,6 +3117,14 @@ export const api = {
         else if (!/\.(pdf|jpe?g|png)$/i.test(f.proofFileName)) fields.proofFileName = 'PDF, JPG or PNG only';
         else if ((f.proofSizeMb ?? 0) > TOPUP_RULES.maxFileMb) fields.proofFileName = `Max ${TOPUP_RULES.maxFileMb} MB`;
         if ((f.remarks?.length ?? 0) > 200) fields.remarks = 'Max 200 characters';
+        // Timeline 2 review (Screen Inventory, PR entry): a check payment needs the check number, check date and drawee bank.
+        const byCheck = isCheckMethod(f.method);
+        if (byCheck) {
+          if (!f.checkNo?.trim()) fields.checkNo = 'Check number is required';
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(f.checkDate ?? '')) fields.checkDate = 'Check date is required';
+          else if (f.checkDate! > addDays(today, 180).slice(0, 10)) fields.checkDate = 'Within the next 180 days';
+          if (!f.checkBank?.trim()) fields.checkBank = 'Drawee bank is required';
+        }
         if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
         const ref = f.reference.trim();
         if (db.topups.some((t) => t.clientCode === u.clientCode && (t.paymentRef ?? '').toUpperCase() === ref.toUpperCase() && t.status !== 'Rejected'))
@@ -3049,14 +3132,16 @@ export const api = {
         if (f.resubmitOf && !db.topups.some((t) => t.id === f.resubmitOf && t.clientCode === u.clientCode && t.status === 'Rejected')) throw new ApiError('INVALID_STATE', 'Only a rejected request can be resubmitted.', 409);
         const c = mustClient(u.clientCode!);
         const t: TopupRequest = { id: nextNo('TU', 'TU-', 6), clientCode: u.clientCode!, amount: round2(f.amount), proofFileName: f.proofFileName, paymentRef: ref, status: 'Submitted', submittedAt: nowIso(),
-          transferDate: f.transferDate, method: f.method.trim(), sendingBank: f.sendingBank?.trim() || undefined, remarks: f.remarks?.trim() || undefined, resubmitOf: f.resubmitOf };
+          transferDate: f.transferDate, method: f.method.trim(), sendingBank: f.sendingBank?.trim() || undefined, remarks: f.remarks?.trim() || undefined, resubmitOf: f.resubmitOf,
+          ...(byCheck ? { checkNo: f.checkNo!.trim(), checkDate: f.checkDate, checkBank: f.checkBank!.trim() } : {}) };
         const at = nowIso();
         const treasury = db.users.filter((x) => x.realm === 'INTERNAL' && x.status === 'Active' && x.roles.includes('TREASURY'));
         const ae = db.users.find((x) => x.userId === c.aeAssigned);
+        // Timeline 2 review: the mock cannot send email, so the notices are Queued (the mail service sets Sent / Failed) — the result no longer claims delivery.
         t.notified = [
-          ...treasury.map((x) => ({ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${x.name} — Treasury (to confirm the funds)`, to: x.email, status: 'Sent' as const })),
-          ...(ae ? [{ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${ae.name} — Account Executive`, to: ae.email, status: 'Sent' as const }] : []),
-          { at, channel: 'Email' as const, audience: 'Client' as const, recipient: `${u.name} (confirmation)`, to: u.email, status: 'Sent' as const },
+          ...treasury.map((x) => ({ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${x.name} — Treasury (to confirm the funds)`, to: x.email, status: 'Queued' as const })),
+          ...(ae ? [{ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${ae.name} — Account Executive`, to: ae.email, status: 'Queued' as const }] : []),
+          { at, channel: 'Email' as const, audience: 'Client' as const, recipient: `${u.name} (confirmation)`, to: u.email, status: 'Queued' as const },
         ];
         db.topups.unshift(t);
         notify('ewallet.topup', `Top-up ${t.id} to confirm: ${c.clientName}`, `₱${t.amount.toLocaleString('en-PH')} · ${t.method} · ref ${ref} · transferred ${t.transferDate}${t.resubmitOf ? ` · resubmission of ${t.resubmitOf}` : ''}`,
@@ -3414,6 +3499,8 @@ export const api = {
         const rateOf = (contractNo?: string, eq?: string) => db.contracts.find((x) => x.contractNo === contractNo)?.rates.find((r) => r.equipmentType === eq)?.dailyRate;
         const typeOf = (chassisNo: string) => db.chassis.find((x) => x.chassisNo === chassisNo)?.chassisType;
         const openReturn = (chassisNo: string) => (db.returnRequests ?? []).find((r) => r.clientCode === code && r.chassisNo === chassisNo && (r.status === 'Requested' || r.status === 'Scheduled'));
+        // Timeline 2 review: one rule for every open rescue status — the unit shows "Under rescue" and cannot be returned until it ends.
+        const openRescueOf = (chassisNo: string) => db.rescues.filter((r) => r.clientCode === code && r.chassisNo === chassisNo && rescueIsOpen(r)).sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))[0];
         // Overdue amount and the six aging buckets (same calculation as Aging / SOA).
         const overdueInvs = unpaid.filter((i) => paymentStatus(i) === 'Overdue');
         // Cash bond: what could be withdrawn today (BR-14), so the dashboard link is only offered when something is refundable.
@@ -3464,12 +3551,15 @@ export const api = {
             const dailyRate = rateOf(x.currentContractNo, x.chassisType);
             const days = gateOut ? hireDays(gateOut).billable : undefined;
             const rr = openReturn(x.chassisNo);
+            const rsc = openRescueOf(x.chassisNo);
+            const rs = rsc ? rescueUnitState(rsc.status) : x.status === 'Rescue' ? rescueUnitState('In Progress') : undefined;
             return {
               chassisNo: x.chassisNo, chassisType: x.chassisType, branchCode: x.branchCode, status: x.status, contractNo: x.currentContractNo, gateOut, gatePassNo: x.currentGatePassNo,
               dailyRate, hireDays: days, accrued: dailyRate != null && days != null ? round2(dailyRate * days) : undefined,
               returnRequest: rr ? { requestNo: rr.requestNo, preferredDate: rr.preferredDate, returnBranchCode: rr.returnBranchCode, status: rr.status } : undefined,
-              // Proposed (Q-PTL-03): a return can be requested for a unit on hire (not while it is under rescue) with no open request.
-              canRequestReturn: x.status === 'On Hire' && !rr,
+              rescue: rs ? { ...rs, rescueNo: rsc?.rescueNo, status: rsc?.status ?? 'In Progress', eta: rsc?.eta } : undefined,
+              // Proposed (Q-PTL-03): a return can be requested for a unit on hire with no open request and no open rescue (any status from Requested).
+              canRequestReturn: x.status === 'On Hire' && !rr && !rs,
             };
           }),
           // DBL-CLT-017 equipment return history: Gate In passes for this client, paired with their Gate Out.
@@ -3499,7 +3589,9 @@ export const api = {
           accountExecutive: ae ? { name: ae.name, email: ae.email, mobile: ae.mobile } : null,
           // Portal sign-in review (BR-01): who to call about a hold, shown with the restriction message.
           creditContact: creditContact(),
-          gates: { ewa: creditGate(c, 'PORTAL_EWA'), rescue: creditGate(c, 'RESCUE_REQUEST') },
+          gates: { ewa: creditGate(c, 'PORTAL_EWA'), rescue: portalRescueGate(c) },
+          // Timeline 2 review: the billing rules the portal states (both pending Delbros decisions — see System settings).
+          billing: { creditTermBasis: (String(S()['fin.credit_term_basis'] ?? 'invoice_date') === 'acknowledgment' ? 'acknowledgment' : 'invoice_date') as 'invoice_date' | 'acknowledgment', weekly: weeklyCycle(String(S()['fin.weekly_cycle_start'] ?? 'Friday')) },
         };
       });
     },
@@ -3543,6 +3635,8 @@ export const api = {
         const ch = db.chassis.find((x) => x.chassisNo === f.chassisNo && x.currentClientCode === c.clientCode);
         if (!ch) throw new ApiError('NOT_FOUND', 'That unit is not on hire to your account.', 404);
         if (ch.status !== 'On Hire') throw new ApiError('INVALID_STATE', `${ch.chassisNo} is under ${ch.status.toLowerCase()} — the return is arranged once it is back on hire.`, 409);
+        const rsc = db.rescues.find((r) => r.clientCode === c.clientCode && r.chassisNo === ch.chassisNo && rescueIsOpen(r));
+        if (rsc) throw new ApiError('INVALID_STATE', `${ch.chassisNo} is under rescue (${rsc.rescueNo}, ${rsc.status.toLowerCase()}) — request the return after the rescue is completed or cancelled.`, 409);
         if ((db.returnRequests ?? []).some((r) => r.chassisNo === ch.chassisNo && (r.status === 'Requested' || r.status === 'Scheduled'))) throw new ApiError('DUPLICATE', `A return is already requested for ${ch.chassisNo}.`, 409);
         const allowed = new Set([c.branchCode, ...c.cwsBranchAccess, ch.branchCode]);
         const fields: Record<string, string> = {};
@@ -3553,8 +3647,16 @@ export const api = {
         else if (f.preferredDate > addDays(today, 60).slice(0, 10)) fields.preferredDate = 'Within the next 60 days';
         if (Object.keys(fields).length) throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
         const origin = db.gatePasses.find((g) => g.gatePassNo === ch.currentGatePassNo)?.branchCode ?? ch.branchCode;
+        const at = nowIso();
+        // Timeline 2 review: who receives the request — the return branch's Branch Generalists and the Account Executive; the client gets a confirmation.
+        const notified: EwaDelivery[] = [
+          ...db.users.filter((x) => x.realm === 'INTERNAL' && x.status === 'Active' && x.roles.includes('BRANCH_GENERALIST') && x.branchCode === f.returnBranchCode)
+            .map((x) => ({ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${x.name} — Branch Generalist, ${f.returnBranchCode} (schedules the Gate In)`, to: x.email, status: 'Queued' as const })),
+          ...((ae) => (ae ? [{ at, channel: 'Email' as const, audience: 'Delbros' as const, recipient: `${ae.name} — Account Executive`, to: ae.email, status: 'Queued' as const }] : []))(db.users.find((x) => x.userId === c.aeAssigned)),
+          { at, channel: 'Email', audience: 'Client', recipient: `${u.name} (confirmation)`, to: u.email, status: 'Queued' },
+        ];
         const r = { requestNo: nextNo('RTN', 'RTN-', 6), clientCode: c.clientCode, chassisNo: ch.chassisNo, contractNo: ch.currentContractNo, originBranchCode: origin, returnBranchCode: f.returnBranchCode,
-          preferredDate: f.preferredDate, notes: f.notes?.trim() || undefined, status: 'Requested' as const, requestedAt: nowIso(), requestedBy: u.userId };
+          preferredDate: f.preferredDate, notes: f.notes?.trim() || undefined, status: 'Requested' as const, requestedAt: at, requestedBy: u.userId, notified };
         (db.returnRequests ??= []).unshift(r);
         const cross = origin !== f.returnBranchCode;
         notify('client.return_request', `Return requested: ${ch.chassisNo}`, `${c.clientName} · ${r.requestNo} · return at ${f.returnBranchCode} on ${f.preferredDate}${cross ? ` — cross-branch from ${origin}, IT approval code needed (BR-16)` : ''}`,
@@ -3709,7 +3811,8 @@ export const api = {
           // Branch activity under this contract: releases (Gate Out) and EWAs, by branch — all should be inside the covered branches.
           const outs = db.gatePasses.filter((g) => g.contractNo === k.contractNo && g.direction === 'OUT');
           const ewas = db.ewas.filter((e) => e.contractNo === k.contractNo);
-          const activity = Array.from(new Set([...outs.map((g) => g.branchCode), ...ewas.map((e) => e.branchCode)])).sort().map((b) => ({
+          // Timeline 2 review: every covered branch is listed, with zeros where there is no activity (Navotas), plus any branch with activity outside the list.
+          const activity = Array.from(new Set([...(k.status === 'Active' ? covered : []), ...outs.map((g) => g.branchCode), ...ewas.map((e) => e.branchCode)])).sort((a, b) => branchName(a).localeCompare(branchName(b))).map((b) => ({
             code: b, name: branchName(b), releases: outs.filter((g) => g.branchCode === b).length, ewas: ewas.filter((e) => e.branchCode === b).length, onHire: onHire.filter((x) => x.branchCode === b).length, covered: covered.includes(b) }));
           const rc = (eq: string) => (db.rateCards ?? []).find((r) => r.equipmentType === eq && r.contractType === k.contractType && r.validFrom <= today && (!r.validTo || r.validTo >= today));
           return {
@@ -3719,7 +3822,7 @@ export const api = {
             renewalNotices: k.expiryDate && k.status === 'Active' ? renewalNoticeDates(k.expiryDate).map((n) => ({ ...n, sent: n.date <= today })) : [],
             entitlement: k.rates.map((r) => {
               const t = ent?.types.find((x) => x.equipmentType === r.equipmentType);
-              return { equipmentType: r.equipmentType, dailyRate: r.dailyRate, rateCard: rc(r.equipmentType)?.dailyRate, entitled: k.entitlementByType || r.qty ? (r.qty ?? 0) : undefined,
+              return { equipmentType: r.equipmentType, dailyRate: r.dailyRate, rateCard: rc(r.equipmentType)?.dailyRate, indemnity: r.indemnity, entitled: k.entitlementByType || r.qty ? (r.qty ?? 0) : undefined,
                 onHire: onHire.filter((x) => x.chassisType === r.equipmentType).length, pending: t?.pending ?? 0, remaining: t?.remaining };
             }),
             entitlementTotals: ent ? { unitQty: ent.unitQty, onHire: ent.onHire, pending: ent.pending, remaining: ent.contractRemaining } : undefined,
@@ -3727,6 +3830,11 @@ export const api = {
             branches: { covered: covered.map((b) => ({ code: b, name: branchName(b) })), activity, outside: activity.filter((a) => !a.covered).map((a) => a.code) },
             requests: (db.contractRequests ?? []).filter((r) => r.contractNo === k.contractNo).map((r) => ({ ...r, decidedByName: db.users.find((x) => x.userId === r.decidedBy)?.name ?? r.decidedBy })),
             bondHeld: db.cashBonds.filter((b) => b.contractNo === k.contractNo && (b.status === 'Held' || b.status === 'Withdrawal Pending')).reduce((a, b) => a + b.amount, 0),
+            // Timeline 2 review: every bond on this contract with what happened to it (refunded, transferred, applied, forfeited) — the "—" on ended contracts explained.
+            bonds: db.cashBonds.filter((b) => b.contractNo === k.contractNo).map((b) => ({ id: b.id, amount: b.amount, dateReceived: b.dateReceived, receiptRef: b.receiptRef, status: b.status, outcome: b.outcome,
+              refund: b.withdrawals.find((w) => w.status === 'Refunded')?.refund })),
+            signatory: ((p) => (p ? { name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone } : undefined))(c.contacts.find((x) => x.id === k.signatoryId) ?? c.contacts.find((x) => x.isSignatory)),
+            regionName: k.region,
             ewalletMinimum: db.ewallets.find((w) => w.clientCode === c.clientCode)?.minimumBalance,
           };
         });
@@ -3765,6 +3873,26 @@ export const api = {
           { clientCode: c.clientCode, aeUserId: c.aeAssigned, extraUsers: [c.aeAssigned, ...db.users.filter((x) => x.realm === 'INTERNAL' && x.roles.includes('SALES_DIRECTOR')).map((x) => x.userId)], link: '/contracts' });
         audit('portal.contract_request', 'contract', k.contractNo, r);
         return r;
+      });
+    },
+    /**
+     * Timeline 2 review (DBL-CNC-005, DBL-FIN-006): "Send to my email" — the statement for the chosen period goes to the signed-in user (and the
+     * company billing email when asked). Logged like a staff SOA send; the mock queues the email (the mail service sets the delivery state).
+     */
+    async emailSoa(f: { from?: string; to?: string; copyBilling?: boolean } = {}) {
+      const u = me(); if (u.realm !== 'CLIENT_PORTAL') throw new ApiError('FORBIDDEN', 'Client access only.', 403);
+      await delay();
+      return tx(() => {
+        const c = mustClient(u.clientCode!);
+        if (f.from && f.to && f.from > f.to) throw new ApiError('VALIDATION_FAILED', 'The period start is after its end.', 422, { from: 'Before the end date' });
+        const soaNo = nextNo('SOA', `SOA-${new Date().getFullYear()}-`, 5);
+        const to = [u.email, ...(f.copyBilling && c.ebillingEmail && c.ebillingEmail !== u.email ? [c.ebillingEmail] : [])];
+        const at = nowIso();
+        let cc = db.collections.find((x) => x.clientCode === c.clientCode);
+        if (!cc) { cc = { clientCode: c.clientCode, stage: 'None', actions: [] }; db.collections.push(cc); }
+        (cc.soaSends ??= []).unshift({ id: uid(), soaNo, at, by: u.userId, channel: 'Email', to: to.join(', ') });
+        audit('portal.soa_emailed', 'client', c.clientCode, { soaNo, to, period: { from: f.from || 'start', to: f.to || 'today' } });
+        return { soaNo, at, period: { from: f.from, to: f.to }, recipients: to.map((x) => ({ to: x, status: 'Queued' as const })) };
       });
     },
     /** Dashboard review: the client's notifications, each with a link to the record in the portal. */

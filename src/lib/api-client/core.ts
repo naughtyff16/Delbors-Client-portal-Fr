@@ -48,10 +48,11 @@ export function inScope(branchCode?: string) {
 export const settings = () => settingsToMap(db.settings) as Record<string, number & string>;
 
 // ── Audit (append-only) ────────────────────────────────────────────────────
-export function audit(action: string, entityType: string, entityId: string, after?: unknown, reason?: string, before?: unknown) {
+/** `as` names the actor when there is no session (e.g. the Account Executive deciding from the one-click email link). */
+export function audit(action: string, entityType: string, entityId: string, after?: unknown, reason?: string, before?: unknown, as?: { actor: string; actorRole: string; source: string }) {
   const snap = (v: unknown) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v))); // freeze values so later edits to the record can't alter the log
-  const ev: AuditEvent = { id: uid(), at: new Date().toISOString(), actor: current?.userId ?? 'system', actorRole: current?.roles[0] ?? 'SYSTEM', action, entityType, entityId, before: snap(before), after: snap(after), reason,
-    source: current ? `${current.realm === 'INTERNAL' ? 'Web (internal)' : 'Portal'} · ${typeof navigator !== 'undefined' ? navigator.platform || 'browser' : 'server'}` : 'System job' };
+  const ev: AuditEvent = { id: uid(), at: new Date().toISOString(), actor: as?.actor ?? current?.userId ?? 'system', actorRole: as?.actorRole ?? current?.roles[0] ?? 'SYSTEM', action, entityType, entityId, before: snap(before), after: snap(after), reason,
+    source: as?.source ?? (current ? `${current.realm === 'INTERNAL' ? 'Web (internal)' : 'Portal'} · ${typeof navigator !== 'undefined' ? navigator.platform || 'browser' : 'server'}` : 'System job') };
   sealAudit(ev, db.audit[0]?.hash);
   db.audit.unshift(ev);
 }

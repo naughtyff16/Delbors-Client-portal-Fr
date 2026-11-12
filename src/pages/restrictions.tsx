@@ -51,13 +51,14 @@ export function restrictionOf(d: Dash | undefined, scope: Scope) {
   const gate = scope === 'ewa' ? d.gates.ewa : d.gates.rescue;
   if (gate.allowed) return null;
   if (hold) return 'hold' as const;
+  if (gate.code === 'WALLET') return 'wallet' as const; // Timeline 2 review: rescue needs a funded e-wallet (res.funded_wallet_rule)
   return gate.code === 'ELIGIBILITY' ? ('not_enabled' as const) : ('other' as const);
 }
 
 /** Short label for a blocked quick-action tile on the dashboard. */
 export function restrictionHint(d: Dash, scope: 'ewa' | 'rescue') {
   const r = restrictionOf(d, scope);
-  return r === 'hold' ? 'Blocked — account on hold' : r === 'not_enabled' ? 'Not enabled — contact your Account Executive' : 'Unavailable — account restricted';
+  return r === 'hold' ? 'Blocked — account on hold' : r === 'not_enabled' ? 'Not enabled — contact your Account Executive' : r === 'wallet' ? 'Needs a funded e-wallet — top up first' : 'Unavailable — account restricted';
 }
 
 export function AccountRestriction({ dash, scope, className }: { dash?: Dash; scope: Scope; className?: string }) {
@@ -85,6 +86,15 @@ export function AccountRestriction({ dash, scope, className }: { dash?: Dash; sc
     );
   }
   const gate = scope === 'ewa' ? d.gates.ewa : d.gates.rescue;
+  if (r === 'wallet') {
+    return (
+      <Banner tone="warning" className={className} title="Rescue requests need a funded e-wallet" actions={<Link to="/client/ewallet"><Button size="sm">Request a top-up</Button></Link>}>
+        <p>{gate.reason}</p>
+        <p className="mt-1 text-xs">Rule pending Finance confirmation (UC-05 / DBL-CLT-005: Allow for Rescue requires a funded e-wallet).</p>
+        <Contacts list={[aeContact(d)]} />
+      </Banner>
+    );
+  }
   return (
     <Banner tone="danger" className={className} title={scope === 'ewa' ? 'EWA creation unavailable' : 'Rescue requests unavailable'}>
       <p>{gate.reason}</p>

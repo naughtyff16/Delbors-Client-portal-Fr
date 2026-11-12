@@ -35,9 +35,9 @@ export function ewaShareText(e: EwaListRow, eqName: (c: string) => string, clien
     `Valid until ${formatDateTime(e.validUntil)} ${TZ}`,
     `Pickup branch ${e.branchCode} · contract ${e.contractNo}`,
     `Trucker ${e.trucker} · truck ${e.truckPlateNo}`,
-    `Driver ${e.driverName} · licence ${e.driverLicenseNo}`,
+    `Driver ${e.driverName} · license ${e.driverLicenseNo}`,
     `Units: ${e.units.map((u) => `${eqName(u.equipmentType)} × ${u.qty}`).join(", ")}`,
-    "Present the EU number and a valid licence at the gate.",
+    "Present the EU number and a valid license at the gate.",
   ].join("\n");
 }
 
@@ -56,6 +56,7 @@ export function EwaHistory({ e }: { e: EwaListRow }) {
           : "The EWA stays expired.",
       });
   }
+  for (const a of e.extension?.approvals ?? []) if (a.at) steps.push({ at: a.at, title: `${a.label}: approved${a.by ? ` by ${a.by}` : ""}`, detail: "Extension request — next step below.", tone: "ok" });
   if (e.extension && (e.extensions ?? []).some((x) => x.status === "Pending"))
     steps.push({ at: new Date().toISOString(), title: `Awaiting: ${e.extension.stepLabel ?? "manager approval"}`, detail: "The new valid-until time is set only after manager approval and IT revalidation (BR-06).", tone: "warn" });
   for (const g of e.gatePasses) steps.push({ at: g.at, title: `Released at the gate — ${g.gatePassNo}`, detail: `${g.chassisNo}${g.truckOrcr ? ` · truck OR/CR ${g.truckOrcr}` : ""}`, tone: "ok" });

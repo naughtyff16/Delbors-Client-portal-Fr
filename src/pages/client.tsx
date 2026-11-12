@@ -5,10 +5,12 @@ import {
   Camera,
   Clock,
   Copy,
+  Download,
   Eye,
   FileText,
   LifeBuoy,
   LocateFixed,
+  Mail,
   Plus,
   Share2,
   ShieldOff,
@@ -159,7 +161,7 @@ function EwaPrint({
               ["Pickup branch", e.branchCode],
               ["Trucker", e.trucker],
               ["Driver", e.driverName],
-              ["Driver licence no.", e.driverLicenseNo],
+              ["Driver license no.", e.driverLicenseNo],
               ["Truck plate no.", e.truckPlateNo],
               ["Truck OR/CR no.", e.truckOrcr ?? "Verified at Gate Out"],
               ["Created", formatDateTime(e.createdAt)],
@@ -184,7 +186,7 @@ function EwaPrint({
       </table>
       <p className="text-[11px]">
         Valid for 24 hours from creation. The driver presents this EU number and
-        a valid licence at the gate. Printed{" "}
+        a valid license at the gate. Printed{" "}
         {formatDateTime(new Date().toISOString())} from the client portal.
       </p>
     </div>,
@@ -222,8 +224,10 @@ export function ClientEwaPage() {
   const copyEu = (euNo: string) => void copyText(euNo, `EU no. ${euNo} copied`);
   type Row = EwaRow;
   const [view, setView] = useState<Row | null>(null);
-  // Notification links open the record: /client/ewa?open=EU-000781.
-  useOpenParam(ewas.data as Row[] | undefined, (r, id) => r.euNo === id, setView);
+  // Notification links open the record: /client/ewa?open=EU-000781 (…&cancel=1 from the dashboard opens the cancel dialog).
+  useOpenParam(ewas.data as Row[] | undefined, (r, id) => r.euNo === id, (r, action) => {
+    if (action === "cancel" && clientCanCancel(r)) { setCancelWhy(""); setCancelOf(r); } else setView(r);
+  });
   const [ext, setExt] = useState<Row | null>(null);
   const [reason, setReason] = useState("");
   const extend = useAction(() => api.gate.requestExtension(ext!.euNo, reason), {
@@ -283,8 +287,9 @@ export function ClientEwaPage() {
         Request extension
       </button>
     ) : e.status === "Extension Pending" ? (
-      <span className="mt-1 block text-xs text-warning">
-        Awaiting {e.extension?.stepLabel?.toLowerCase() ?? "approval"}
+      // Short and wrapping, so the Actions column stays on screen; "IT" keeps its capitals.
+      <span className="mt-1 block max-w-36 whitespace-normal text-xs text-warning" title={e.extension?.stepLabel}>
+        {/^IT/.test(e.extension?.stepLabel ?? "") ? "Awaiting IT revalidation" : "Awaiting manager approval"}
       </span>
     ) : clientCanCancel(e) ? (
       <button
@@ -504,7 +509,7 @@ export function ClientEwaPage() {
             cell: (c) => (
               <span className="block leading-tight">
                 {c.row.original.status === "Extension Pending" ? (
-                  <Badge tone="warning">Extension requested</Badge>
+                  <Badge tone="warning" dot={false}>Extension requested</Badge>
                 ) : (
                   <PortalStatus domain="ewa" value={c.getValue<string>()} />
                 )}
@@ -537,12 +542,13 @@ export function ClientEwaPage() {
                     setView(c.row.original);
                   }}
                 />
+                {/* Timeline 2 review: labelled so the client knows it copies the EU number only (it does not create a new EWA). */}
                 <Button
                   size="sm"
                   variant="ghost"
                   className="px-2"
-                  aria-label={`Copy EU no. ${c.row.original.euNo}`}
-                  title="Copy EU no. (to share with your driver)"
+                  aria-label={`Copy EU no. ${c.row.original.euNo} to the clipboard`}
+                  title="Copy EU no. — copies the EU number to your clipboard, to send to your driver. It does not create a new EWA."
                   icon={<Copy className="size-4" />}
                   onClick={(ev) => {
                     ev.stopPropagation();
@@ -635,7 +641,7 @@ export function ClientEwaPage() {
                 ["Trucker", view.trucker],
                 ["Driver name", view.driverName],
                 [
-                  "Driver licence no.",
+                  "Driver license no.",
                   <span key="l" className="font-mono">
                     {view.driverLicenseNo}
                   </span>,
@@ -735,7 +741,7 @@ export function ClientEwaPage() {
             )}
             {view.status === "Extension Pending" && (
               <Banner tone="warning" title="Extension requested">
-                Your request is awaiting {view.extension?.stepLabel?.toLowerCase() ?? "manager approval"}
+                Your request is awaiting {/^IT/.test(view.extension?.stepLabel ?? "") ? "IT revalidation (the manager has approved)" : "manager approval"}
                 {" "}(manager approval, then IT revalidation). The valid-until time
                 changes only once both approve; you will get a notification.
               </Banner>
@@ -876,7 +882,7 @@ export function ClientEwaPage() {
                 ["Trucker", created.trucker],
                 ["Truck plate no.", created.truckPlateNo],
                 ["Driver name", created.driverName],
-                ["Driver licence no.", created.driverLicenseNo],
+                ["Driver license no.", created.driverLicenseNo],
                 [
                   "Equipment",
                   created.units
@@ -948,6 +954,18 @@ const RESCUE_STEPS = [
   "In Progress",
   "Completed",
 ] as const;
+const RESCUE_FILTERS = ["All", "Open", "Requested", "Verified", "Confirmed", "Dispatched", "In Progress", "Completed", "Cancelled"] as const;
+/** Photo file names as small chips (the mock keeps names only; the document service serves the images). */
+function PhotoList({ label, files }: { label: string; files?: string[] }) {
+  return (
+    <div>
+      <p className="mb-1 text-xs text-muted">{label}</p>
+      {files?.length ? (
+        <ul className="flex flex-wrap gap-1.5">{files.map((f) => <li key={f}><Badge tone="info" dot={false} icon={<Camera className="size-3" aria-hidden />}>{f}</Badge></li>)}</ul>
+      ) : <p className="text-sm text-muted">None</p>}
+    </div>
+  );
+}
 export function ClientRescuePage() {
   const dash = useData(["portal-dash"], () => api.portal.dashboard());
   const list = useData(["portal-rescues"], () => api.rescue.list());
@@ -1022,6 +1040,8 @@ export function ClientRescuePage() {
   const [view, setView] = useState<Row | null>(null);
   // Notification links open the record: /client/rescue?open=RSC-000041.
   useOpenParam(list.data as Row[] | undefined, (r, id) => r.rescueNo === id, setView);
+  // Timeline 2 review: status filter (and search) once there are many requests.
+  const [rescueF, setRescueF] = useState<(typeof RESCUE_FILTERS)[number]>("All");
   const [cancelOf, setCancelOf] = useState<Row | null>(null);
   const [cancelWhy, setCancelWhy] = useState("");
   const cancel = useAction(
@@ -1109,9 +1129,11 @@ export function ClientRescuePage() {
           </span>
           <span className="text-muted">Minimum {formatPhp(w.minimumBalance)}</span>
           <span className="min-w-0 flex-1 text-xs text-ink-2">
-            {ws === "healthy" || ws === "near"
-              ? "Rescue charges are deducted from your e-wallet after the rescue is completed."
-              : "You can still request a rescue — it is never refused for a low balance. The charge is deducted afterwards and will take the balance further down; please top up."}
+            {/* Timeline 2 review: the warning comes from the same e-wallet rule the API enforces (res.funded_wallet_rule — Finance to confirm). */}
+            {gate?.warning ??
+              (ws === "healthy" || ws === "near"
+                ? "Rescue charges are deducted from your e-wallet after the rescue is completed."
+                : gate && !gate.allowed ? gate.reason : "The charge is deducted after the rescue; please keep the e-wallet above the minimum.")}
           </span>
           {ws !== "healthy" && (
             <Link to="/client/ewallet" className="text-sm font-medium text-brand-600 hover:underline">
@@ -1417,15 +1439,24 @@ export function ClientRescuePage() {
       )}
       <h2 className="mb-1 font-semibold text-ink">My rescue requests</h2>
       <p className="mb-2 text-xs text-muted">
-        Requested → Verified (Credit & Collection) → Confirmed → Dispatched (crew on the way, with ETA) → In progress → Completed. You can cancel
-        while a request is Requested; after that, call the dispatcher. Times are Philippine time (PHT).
+        Requested → Verified (Credit & Collection checked eligibility) → Confirmed (Delbros approved the rescue) → Dispatched (crew on the way, with ETA) → In
+        progress → Completed. You get a notice at Confirmed, Dispatched and Completed. You can cancel while a request is Requested; after that, call the
+        dispatcher. Times are Philippine time (PHT).
       </p>
       <DataTable<Row>
-        data={list.data}
+        data={(list.data ?? []).filter((r) => rescueF === "All" || (rescueF === "Open" ? r.isOpen : r.status === rescueF))}
         loading={list.isLoading}
-        searchable={false}
-        emptyTitle="No rescue requests"
+        pageSize={10}
+        searchPlaceholder="Search reference, unit, location or contact…"
+        emptyTitle={rescueF === "All" ? "No rescue requests" : `No ${rescueF.toLowerCase()} requests`}
         onRowClick={setView}
+        toolbar={
+          <Segmented
+            value={rescueF}
+            onChange={setRescueF}
+            options={RESCUE_FILTERS.map((s) => ({ value: s, label: s === "In Progress" ? "In progress" : s }))}
+          />
+        }
         columns={[
           {
             accessorKey: "rescueNo",
@@ -1631,7 +1662,6 @@ export function ClientRescuePage() {
                   "Completed",
                   view.completedAt ? formatDateTime(view.completedAt) : "—",
                 ],
-                ["Photos", view.photos?.length ? view.photos.join(", ") : "—"],
               ]}
             />
             {/* BR-11 breakdown once completed: travel + tires + parts, +10% service fee, +12% VAT. */}
@@ -1678,6 +1708,42 @@ export function ClientRescuePage() {
                 </tbody>
               </table>
             )}
+            {/* Timeline 2 review (DBL-RES-006 / 008): dispatch and completion evidence — crew, vehicle, ETA, before / after photos and the acknowledgment. */}
+            {(view.status === "Completed" || view.beforePhotos?.length || view.afterPhotos?.length) && (
+              <div className="rounded-lg border border-line p-3">
+                <p className="mb-2 text-xs font-medium text-muted">Completion evidence</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <PhotoList label="Before the repair" files={view.beforePhotos} />
+                  <PhotoList label="After the repair" files={view.afterPhotos} />
+                </div>
+                <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                  <div><dt className="text-xs text-muted">On-site assessment</dt><dd>{view.onsiteAssessment ?? "—"}</dd></div>
+                  <div>
+                    <dt className="text-xs text-muted">Client acknowledgment</dt>
+                    <dd>{view.clientAckName ? <>Signed by <strong>{view.clientAckName}</strong>{view.acknowledgedAt ? ` · ${formatDateTime(view.acknowledgedAt)} PHT` : ""}</> : <span className="text-warning">Not recorded</span>}</dd>
+                  </div>
+                </dl>
+              </div>
+            )}
+            <PhotoList label="Photos sent with the request" files={view.photos} />
+            <div>
+              <p className="mb-1 text-xs font-medium text-muted">Status notices sent to you</p>
+              {view.clientNotices?.length ? (
+                <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                  {view.clientNotices.map((n, i) => (
+                    <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+                      <span className="min-w-0"><span className="text-ink">{n.subject}</span><span className="block text-xs text-muted">{n.channel} · {n.to}</span></span>
+                      <span className="flex items-center gap-2 text-xs text-muted">
+                        {formatDateTime(n.at)} PHT
+                        <Badge tone={n.status === "Sent" ? "success" : n.status === "Queued" ? "warning" : "danger"}>{n.status === "Queued" ? "Queued for sending" : n.status}</Badge>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted">{view.status === "Requested" || view.status === "Verified" ? "You will get a notice when Delbros confirms the rescue, when the crew is dispatched (with the ETA) and when it is completed." : "No status notices recorded for this request."}</p>
+              )}
+            </div>
             <div>
               <p className="mb-1 text-xs font-medium text-muted">Notified when the request was made</p>
               <NotifiedList list={view.notified} />
@@ -2028,10 +2094,17 @@ export function ClientInvoicesPage() {
   );
   type Row = InvRow;
   const [inv, setInv] = useState<Row | null>(null);
-  useOpenParam(invs.data as Row[] | undefined, (r, id) => r.invoiceNo === id, setInv);
-  const [pay, setPay] = useState<(typeof PAY_FILTERS)[number]>("All");
   // Invoice review: proof of payment and disputes (proposed scope), SOA period.
   const [advice, setAdvice] = useState<Row | null>(null);
+  // Notification links open the invoice; the dashboard's "Pay now" (…&pay=1) opens the proof-of-payment form for it.
+  useOpenParam(invs.data as Row[] | undefined, (r, id) => r.invoiceNo === id, (r, action) => (action === "pay" && r.balance > 0 ? setAdvice(r) : setInv(r)));
+  const [pay, setPay] = useState<(typeof PAY_FILTERS)[number]>("All");
+  // Timeline 2 review (DBL-FIN-005): bill type and invoice-date filters.
+  const [billF, setBillF] = useState("");
+  const [invFrom, setInvFrom] = useState("");
+  const [invTo, setInvTo] = useState("");
+  const [mailed, setMailed] = useState<Awaited<ReturnType<typeof api.portal.emailSoa>> | null>(null);
+  const emailSoa = useAction(() => api.portal.emailSoa({ from: soaFrom || undefined, to: soaTo || undefined, copyBilling: true }), { onSuccess: (r) => setMailed(r) });
   const [dispute, setDispute] = useState<Row | null>(null);
   const [soaFrom, setSoaFrom] = useState("");
   const [soaTo, setSoaTo] = useState("");
@@ -2046,6 +2119,23 @@ export function ClientInvoicesPage() {
     ? soa.data.lines[soa.data.lines.length - 1].balance
     : undefined;
   const terms = invs.data?.find((i) => !cancelled(i))?.creditTermDays;
+  // Timeline 2 review (DBL-CNC-005, Q-CNC-03): the 30-day term is stated from the rule set in System settings.
+  const termBasis = dash.data?.billing.creditTermBasis === "acknowledgment" ? "the day you acknowledge receipt of the invoice" : "the invoice date";
+  const ack = soa.data?.acknowledgedAt;
+  const downloadSoa = () => {
+    if (!soa.data || !soaView) return;
+    const rows = (soaView.rows as { date: string; docType: string; docNo: string; ref?: string; debit: number; credit: number; balance: number }[]);
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [["Date", "Type", "Doc no.", "Note", "Debit", "Credit", "Balance"], ...rows.map((l) => [formatDate(l.date), l.docType, l.docNo, l.ref ?? "", l.debit || "", l.credit || "", l.balance])]
+      .map((r) => r.map(esc).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8" }));
+    a.download = `${soa.data.soaNo}_${soa.data.client.clientCode}${soaFrom ? `_${soaFrom}` : ""}${soaTo ? `_to_${soaTo}` : ""}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const billLabel = (r: Row) => (r.isLease ? `${r.billingCycle ?? "Weekly"} lease` : r.billType);
+  const units = (r: Row) => [...new Set(r.lines.map((l) => l.chassisNo).filter(Boolean))] as string[];
   const printInvoice = () => {
     setPrintInv(true);
     setTimeout(() => {
@@ -2057,18 +2147,22 @@ export function ClientInvoicesPage() {
     <>
       <PageHeader
         title="Invoices & statement"
-        description={`Your invoices, payment status and statement of account.${terms ? ` Payment terms: ${terms} days from the invoice date; aging counts days past the due date.` : ""}`}
+        description={`Your invoices, payment status and statement of account.${terms ? ` Payment terms: ${terms} days from ${termBasis}; aging counts days past the due date.` : ""}${ack ? ` Statement acknowledged ${formatDate(ack)}.` : ""}`}
         actions={
-          <Button
-            variant="secondary"
-            disabled={!soa.data}
-            onClick={() => window.print()}
-            icon={<FileText className="size-4" />}
-          >
-            Print statement
-          </Button>
+          <span className="flex flex-wrap justify-end gap-2">
+            <Button variant="secondary" disabled={!soa.data} onClick={() => window.print()} icon={<FileText className="size-4" />}>Print / save PDF</Button>
+            <Button variant="secondary" disabled={!soa.data} onClick={downloadSoa} icon={<Download className="size-4" />}>Download (CSV)</Button>
+            <Button variant="secondary" disabled={!soa.data} loading={emailSoa.isPending} onClick={() => emailSoa.mutate(undefined)} icon={<Mail className="size-4" />}>Send to my email</Button>
+          </span>
         }
       />
+      {mailed && (
+        <Banner tone="success" className="mb-4" title={`Statement ${mailed.soaNo} sent`} actions={<Button size="sm" variant="secondary" onClick={() => setMailed(null)}>Close</Button>}>
+          Period {mailed.period.from ? formatDate(mailed.period.from) : "account start"} – {mailed.period.to ? formatDate(mailed.period.to) : "today"} ·{" "}
+          {mailed.recipients.map((r) => `${r.to} (queued for sending)`).join(", ")}.
+        </Banner>
+      )}
+      {emailSoa.error && <Banner tone="danger" className="mb-4">{errMessage(emailSoa.error)}</Banner>}
       {printInv && inv ? (
         <InvoicePrint i={inv} client={dash.data?.client} />
       ) : (
@@ -2102,10 +2196,10 @@ export function ClientInvoicesPage() {
           ))}
         </div>
       )}
-      {invs.data && <BillingCoverage invs={invs.data} cycle={dash.data?.client.billingCycle} />}
+      {invs.data && <BillingCoverage invs={invs.data} cycle={dash.data?.client.billingCycle} week={dash.data?.billing.weekly.label} />}
       <DataTable<Row>
         data={(invs.data ?? []).filter(
-          (i) => pay === "All" || i.payment === pay,
+          (i) => (pay === "All" || i.payment === pay) && (!billF || billLabel(i) === billF) && (!invFrom || i.invoiceDate >= invFrom) && (!invTo || i.invoiceDate <= invTo),
         )}
         loading={invs.isLoading}
         pageSize={8}
@@ -2128,6 +2222,14 @@ export function ClientInvoicesPage() {
                 label: p === "Partially Paid" ? "Partly paid" : p,
               }))}
             />
+            <Select aria-label="Bill type" value={billF} onChange={(e) => setBillF(e.target.value)}
+              options={[{ value: "", label: "All bill types" }, ...[...new Set((invs.data ?? []).map(billLabel))].sort().map((b) => ({ value: b, label: b }))]} />
+            <span className="flex items-center gap-1.5 whitespace-nowrap text-sm text-muted">
+              Dated
+              <DatePicker aria-label="Invoice date from" value={invFrom} max={invTo || undefined} onChange={setInvFrom} placeholder="From" className="w-36" />–
+              <DatePicker aria-label="Invoice date to" value={invTo} min={invFrom || undefined} onChange={setInvTo} placeholder="To" className="w-36" />
+              {(invFrom || invTo) && <button type="button" className="text-xs font-medium text-brand-600 hover:underline" onClick={() => { setInvFrom(""); setInvTo(""); }}>Clear</button>}
+            </span>
           </>
         }
         columns={[
@@ -2153,10 +2255,25 @@ export function ClientInvoicesPage() {
             cell: (c) => formatDate(c.getValue<string>()),
           },
           {
+            // Timeline 2 review (DBL-FIN-005): bill type, contract and the units billed, with the period.
             id: "p",
-            header: "Period / basis",
-            accessorFn: (r) => periodLabel(r),
-            cell: (c) => periodLabel(c.row.original),
+            header: "Bill type · period · units",
+            accessorFn: (r) => `${billLabel(r)} ${periodLabel(r)} ${r.contractNo ?? ""} ${units(r).join(" ")}`,
+            cell: (c) => {
+              const r = c.row.original;
+              const u = units(r);
+              return (
+                // Stacked (type / period / contract · units) so the table still fits without sideways scrolling.
+                <span className="block leading-tight">
+                  <Badge tone={r.isLease ? "info" : "neutral"} dot={false}>{billLabel(r)}</Badge>
+                  <span className="mt-0.5 block whitespace-nowrap text-[13px]">{r.isLease ? periodLabel(r) : formatDate(r.periodStart)}</span>
+                  <span className="block whitespace-nowrap text-xs text-muted">
+                    {r.contractNo && <span className="font-mono">{r.contractNo}</span>}
+                    {u.length ? ` · ${u.length <= 2 ? u.join(", ") : `${u.length} units`}` : ""}
+                  </span>
+                </span>
+              );
+            },
           },
           {
             // Net, VAT and total per invoice.
@@ -2307,6 +2424,8 @@ export function ClientInvoicesPage() {
                           {l.chassisNo}
                         </span>
                       )}
+                      {/* Timeline 2 review: lease lines come from the unit's hire (Gate Out → Gate In) inside the billed week. */}
+                      {l.lineType === "Lease" && l.reason && <span className="block text-xs text-muted">{l.reason}</span>}
                     </td>
                     <td className="whitespace-nowrap text-xs text-muted">
                       {l.from ? `${formatDate(l.from)}${l.to && l.to !== l.from ? ` – ${formatDate(l.to)}` : ""}` : "—"}
@@ -2512,6 +2631,22 @@ export function ClientInvoicesPage() {
               {awaitingClearance.map((x) => `${x.receiptNo} ${formatPhp(x.amount)} for ${x.invoiceNo}`).join("; ")}.
             </p>
           )}
+          {/* Timeline 2 review (scope pending Finance): what the statement leaves out, so it reconciles with the e-wallet ledger. */}
+          {(() => {
+            const n = soa.data.notOnStatement;
+            return (
+              <div className="mt-3 rounded-lg border border-line bg-surface-alt/50 px-3 py-2 text-sm">
+                <p className="font-medium text-ink">Not on this statement</p>
+                <ul className="mt-1 space-y-0.5 text-xs text-ink-2">
+                  {n.unsettledDebitMemos.length ? n.unsettledDebitMemos.map((m) => (
+                    <li key={m.memoNo}><span className="font-mono">{m.memoNo}</span> {formatPhp(m.amount)} — posted {formatDate(m.createdAt)}, not yet settled ({m.reason}). It is added to an invoice or deducted from your e-wallet; it is counted in the cash bond refund until then.</li>
+                  )) : <li>No posted debit memos waiting to be settled.</li>}
+                  <li>E-wallet: balance {formatPhp(n.ewalletBalance)}; deductions so far {formatPhp(n.ewalletDeductions)} (rescue and debit memos settled from the wallet). These are in the <Link to="/client/ewallet" className="text-brand-600 hover:underline">E-wallet ledger</Link>, not on this statement — except a debit memo applied to an invoice, which shows here.</li>
+                </ul>
+                <p className="mt-1 text-[11px] text-muted">Proposed scope — Finance to confirm whether e-wallet deductions and unsettled debit memos should also appear as statement rows.</p>
+              </div>
+            );
+          })()}
           <p className="mt-3 text-xs text-muted">
             Receipts: a <strong>Provisional Receipt (PR-)</strong> is issued when a payment (for example a check) is received; it becomes an{" "}
             <strong>Official Receipt (OR-)</strong> when Treasury clears the funds, and only then reduces your balance. Credit memos (for example

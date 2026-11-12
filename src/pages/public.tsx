@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Building2, CheckCircle2, Clock, Eye, EyeOff, FileText, KeyRound, MailCheck, ShieldCheck, Truck } from 'lucide-react';
 import { api, ApiError, type PortalContact, type PortalRealm } from '../lib/api-client';
 import { ACCESS_DOC_ACCEPT, ACCESS_DOC_MAX_MB, formatDateTime, passwordOk, portalAccessSchema, type ClientPortalForm } from '../lib/shared';
-import { Banner, Button, Card, ChangeLogLauncher, Checkbox, FormGrid, Input, Select, Stack, cn } from '../lib/ui';
+import { Badge, Banner, Button, Card, ChangeLogLauncher, Checkbox, FormGrid, Input, Select, Stack, cn } from '../lib/ui';
 import logo from '../assets/delbros-logo.png';
 import { clearSignOutReason, previewSessionExpired, readSignOutReason, usePortalAuth } from '../auth';
 import { ContactLine, PasswordRules, PrivacyNoticeModal, useAppConfig, useNow } from './common';
@@ -16,12 +16,12 @@ const REALM_LABEL: Record<PortalRealm, string> = { CLIENT_PORTAL: 'Client', VEND
 const DEMO_PASSWORD = 'Demo@2026';
 
 /** Shared brand header for the sign-in, registration and password-reset pages. */
-function BrandBlock() {
+export function BrandBlock() {
   return <div className="mb-6 flex items-center justify-center gap-3"><img src={logo} alt="Delbros" className="h-12" /><div><p className="text-xl font-bold text-brand-800">Delbros Leasing</p><p className="text-sm text-muted">Client & vendor portal</p></div></div>;
 }
 
 /** Page footer for the public pages: privacy notice link. */
-function PublicFooter() {
+export function PublicFooter() {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -148,6 +148,7 @@ const DEMO_ACCOUNTS: { realm: PortalRealm; email: string; state: string; tone: '
   { realm: 'CLIENT_PORTAL', email: 'j.cruz@abclogistics.ph', state: 'Inactive user', tone: 'bad' },
   { realm: 'CLIENT_PORTAL', email: 'dispatch@visayasfreight.ph', state: 'Locked', tone: 'bad' },
   { realm: 'CLIENT_PORTAL', email: 'finance@baysidehaulage.ph', state: 'Contract ended — cash bond refundable (withdrawal)', tone: 'ok' },
+  { realm: 'CLIENT_PORTAL', email: 'ops@metrocontainer.ph', state: 'E-wallet below minimum — rescue accepted with a warning', tone: 'warn' },
   { realm: 'VENDOR_PORTAL', email: 'vendor@tirepro.ph', state: 'Active — Tire Pro Supply', tone: 'ok' },
   { realm: 'VENDOR_PORTAL', email: 'sales@luzonbrake.ph', state: 'Not accredited', tone: 'bad' },
   { realm: 'VENDOR_PORTAL', email: 'orders@metropaint.ph', state: 'Inactive supplier', tone: 'bad' },
@@ -280,8 +281,11 @@ const DOC_GUIDE: Record<ClientPortalForm['accountType'], string[]> = {
 export function RegisterPage() {
   const [params] = useSearchParams();
   const ref = useQuery({ queryKey: ['ref'], queryFn: () => api.ref.all() });
+  const cfg = useAppConfig();
   const minLen = api.auth.policy().passwordMinLength;
-  const schema = useMemo(() => portalAccessSchema(minLen), [minLen]);
+  // Timeline 2 review (Q-PTL-03): TIN, documents and consent follow System settings (required by default; switchable).
+  const extras = api.auth.policy().registrationExtras;
+  const schema = useMemo(() => portalAccessSchema(minLen, extras), [minLen, extras]);
   const f = useForm<ClientPortalForm>({ resolver: zodResolver(schema), defaultValues: { accountType: params.get('type') === 'vendor' ? 'vendor' : 'client', documents: [], password: '', confirm: '' } });
   const [done, setDone] = useState<Awaited<ReturnType<typeof api.clients.registerPortal>>>();
   const [err, setErr] = useState<string>();
@@ -321,6 +325,7 @@ export function RegisterPage() {
     const steps = isVendor
       ? ['Access request submitted', 'Procurement review and vendor accreditation', 'Vendor portal sign-in enabled — view POs and upload invoices']
       : ['Access request submitted', 'Account Executive approval — portal sign-in enabled', 'Accreditation (Credit & Collection → Finance → Vice President)', 'Account active — create EWAs and request rescue online'];
+    const demoLink = cfg.showDemoLogins ? api.auth.demoApprovalLink(done.reference) : null;
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
         <div className="w-full max-w-xl">
@@ -330,17 +335,33 @@ export function RegisterPage() {
               <CheckCircle2 className="mx-auto mb-3 size-12 text-success" aria-hidden />
               <h1 className="text-xl font-bold text-brand-800">Request received</h1>
               <p className="mt-1 text-sm text-ink-2">Reference <span className="font-mono font-semibold text-ink">{done.reference}</span> · {formatDateTime(done.submittedAt)}</p>
+              {/* Timeline 2 review: the state of the request, in the Brief's words. */}
+              <p className="mt-2"><Badge tone="warning">{done.statusLabel}</Badge></p>
               <p className="mt-3 text-sm text-ink-2">This is a request, not an account yet. <strong>You cannot sign in until {isVendor ? 'Delbros Procurement' : 'your Account Executive'} approves it.</strong>{' '}
                 {isVendor ? 'Procurement will also complete your supplier accreditation.' : 'EWAs and rescue requests stay disabled until your company completes accreditation.'} We sent an acknowledgement to <span className="font-medium">{done.email}</span> and will email you at each step.</p>
             </div>
             <dl className="mt-5 grid gap-x-4 gap-y-2 rounded-lg border border-line bg-surface-alt/50 p-4 text-sm sm:grid-cols-[10rem_1fr]">
               {([
-                ['Account type', isVendor ? 'Vendor / supplier' : 'Client company'], ['Company', done.companyName], ['TIN', done.tin], ['Contact person', done.contactName],
+                ['Account type', isVendor ? 'Vendor / supplier' : 'Client company'], ['Company', done.companyName], ['TIN', done.tin || 'Not given (collected at accreditation)'], ['Contact person', done.contactName],
                 ['Email (sign-in ID)', done.email], ['Phone', done.phone], ['Branch', branchName(done.branchCode)],
+                ...(isVendor ? [] : [['Company code', `${done.subjectId} — confirmed when approved`] as const]),
               ] as const).map(([k, val]) => <div key={k} className="contents"><dt className="text-muted">{k}</dt><dd className="font-medium text-ink">{val}</dd></div>)}
               <dt className="text-muted">Supporting documents</dt>
-              <dd><ul className="space-y-0.5">{done.documents.map((d) => <li key={d} className="flex items-center gap-1.5 text-ink"><FileText className="size-3.5 text-muted" aria-hidden />{d}</li>)}</ul></dd>
+              <dd>{done.documents.length ? <ul className="space-y-0.5">{done.documents.map((d) => <li key={d} className="flex items-center gap-1.5 text-ink"><FileText className="size-3.5 text-muted" aria-hidden />{d}</li>)}</ul> : <span className="text-muted">None (collected at accreditation)</span>}</dd>
             </dl>
+            {/* Timeline 2 review (DBL-CLT-019): who was told — the reviewer gets a one-click approval link, the applicant an acknowledgement. */}
+            <div className="mt-4">
+              <p className="mb-1 text-xs font-medium text-muted">Notices sent</p>
+              <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                {done.notices.map((n) => (
+                  <li key={n.subject} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                    <span className="min-w-0"><span className="text-ink">{n.audience === 'Applicant' ? 'You' : n.audience}</span> · <span className="text-muted">{n.channel} to {n.to}</span>
+                      <span className="block text-xs text-muted">{n.subject}{n.audience !== 'Applicant' ? ' — with a one-click Approve / Deny link' : ''}</span></span>
+                    <Badge tone={n.status === 'Failed' ? 'danger' : n.status === 'Queued' ? 'warning' : 'success'}>{n.status === 'Queued' ? 'Queued for sending' : n.status}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
             <ol className="mx-auto mt-5 space-y-2 text-sm">
               {steps.map((s, i) => (
                 <li key={s} className={cn('flex items-center gap-2', i === 0 ? 'text-ink' : i === 1 ? 'text-warning' : 'text-muted')}>
@@ -352,7 +373,15 @@ export function RegisterPage() {
               <p className="text-xs font-medium text-muted">Questions about your request? Quote {done.reference}:</p>
               <ContactLine contact={done.reviewer} className="mt-0.5" />
             </div>
-            <div className="mt-5 text-center"><Link to="/login" state={{ realm: isVendor ? 'VENDOR_PORTAL' : 'CLIENT_PORTAL' }}><Button variant="secondary">Back to sign in</Button></Link></div>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <Link to={`/access-status?ref=${encodeURIComponent(done.reference)}&email=${encodeURIComponent(done.email)}`}><Button>Check request status</Button></Link>
+              <Link to="/login" state={{ realm: isVendor ? 'VENDOR_PORTAL' : 'CLIENT_PORTAL' }}><Button variant="secondary">Back to sign in</Button></Link>
+            </div>
+            {demoLink && (
+              <p className="mt-4 rounded-lg border border-dashed border-warning-line bg-warning-bg/60 px-3 py-2 text-left text-[13px] text-ink-2">
+                <span className="font-semibold text-warning">Demo.</span> Email is not sent in the demo. <Link className="font-medium text-brand-600 hover:underline" to={demoLink}>Open the one-click approval link the {isVendor ? 'Procurement team' : 'Account Executive'} received →</Link>
+              </p>
+            )}
           </Card>
         </div>
       </div>
@@ -378,7 +407,7 @@ export function RegisterPage() {
               {err && <Banner tone="danger" title="The request was not sent">{err}</Banner>}
               <FormGrid>
                 <Input label="Company name" required error={e.clientName?.message} {...f.register('clientName')} wrapperClassName="md:col-span-2" placeholder="e.g. ABC Logistics Inc." />
-                <Input label="TIN" required error={e.tin?.message} {...f.register('tin')} placeholder="000-000-000-000" inputMode="numeric" hint="BIR Tax Identification Number. One TIN = one company." />
+                <Input label={extras.tin ? 'TIN' : 'TIN (optional)'} required={extras.tin} error={e.tin?.message} {...f.register('tin')} placeholder="000-000-000-000" inputMode="numeric" hint={`BIR Tax Identification Number. One TIN = one company.${extras.tin ? '' : ' Collected at accreditation if left blank.'}`} />
                 <Select label={vendor ? 'Branch you will serve' : 'Nearest branch'} required placeholder="Select" options={branches} error={e.branchCode?.message} {...f.register('branchCode')} />
                 <Input label="Business address" required error={e.address1?.message} {...f.register('address1')} wrapperClassName="md:col-span-2" placeholder="e.g. 123 Roxas Blvd, Pasay City" />
                 <Input label="Contact person — first name" required error={e.firstName?.message} {...f.register('firstName')} placeholder="e.g. Juan" />
@@ -386,7 +415,7 @@ export function RegisterPage() {
                 <Input label="Phone number" required error={e.phone?.message} {...f.register('phone')} placeholder="+63 917 000 0000" />
                 <Input label="Email address" type="email" required error={e.email?.message} {...f.register('email')} placeholder="e.g. name@company.ph" hint="Becomes your sign-in ID. One email can belong to only one company." />
                 <div className="md:col-span-2">
-                  <Input type="file" label="Supporting documents" required multiple accept={ACCESS_DOC_ACCEPT} error={e.documents?.message ?? docErr} onChange={(ev) => onFiles(ev.target.files)}
+                  <Input type="file" label={extras.documents ? 'Supporting documents' : 'Supporting documents (optional)'} required={extras.documents} multiple accept={ACCESS_DOC_ACCEPT} error={e.documents?.message ?? docErr} onChange={(ev) => onFiles(ev.target.files)}
                     hint={`PDF, JPG or PNG, up to ${ACCESS_DOC_MAX_MB} MB each. Choose all files at once.`} />
                   <p className="mt-1.5 text-[13px] text-muted">Please include: {DOC_GUIDE[type].join(' · ')}.</p>
                 </div>
@@ -398,7 +427,8 @@ export function RegisterPage() {
                 </div>
               </FormGrid>
               <div>
-                <Checkbox label={<>I consent to Delbros processing this information for {vendor ? 'supplier accreditation' : 'account registration and credit evaluation'}, per the Data Privacy Act of 2012. <button type="button" className="font-medium text-brand-600 hover:underline" onClick={() => setPrivacy(true)}>Privacy notice</button></>} {...f.register('consent')} />
+                {/* The consent is shown in every case (Data Privacy Act notice); it is required unless switched off in System settings (Q-PTL-03). */}
+                <Checkbox label={<>{extras.consent ? '' : '(Optional) '}I consent to Delbros processing this information for {vendor ? 'supplier accreditation' : 'account registration and credit evaluation'}, per the Data Privacy Act of 2012. <button type="button" className="font-medium text-brand-600 hover:underline" onClick={() => setPrivacy(true)}>Privacy notice</button></>} {...f.register('consent')} />
                 {e.consent && <p className="mt-1 text-xs text-danger">{e.consent.message}</p>}
               </div>
               <div className="flex justify-end gap-2"><Link to="/login" state={{ realm: vendor ? 'VENDOR_PORTAL' : 'CLIENT_PORTAL' }}><Button variant="secondary">Cancel</Button></Link><Button type="submit" loading={f.formState.isSubmitting}>Submit access request</Button></div>

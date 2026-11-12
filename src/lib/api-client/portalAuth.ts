@@ -2,10 +2,11 @@
 // Covers: account access states, lockout, email one-time code, password reset links, portal access requests
 // with the one-email-one-company rule. The real REST API replaces this module; pages only call it through ./api.ts.
 import {
-  formatDateTime, maskEmail, normalizeEmail, passwordChecks, portalAccessSchema, tinDigits,
+  addDays, formatDateTime, maskEmail, normalizeEmail, parseRegistrationExtras, passwordChecks, portalAccessSchema, tinDigits,
   type ClientPortalForm, type ReleaseContacts, type User,
 } from '../shared';
 import { ApiError, audit, db, delay, nextNo, notify, persist, session, setSession, settings } from './core';
+import type { AccessNotice, AccessRequest } from './db';
 
 export type PortalRealm = Exclude<User['realm'], 'INTERNAL'>;
 type DbUser = (typeof db.users)[number];
@@ -46,7 +47,25 @@ export function portalPolicy() {
       : text('co.payee_bank')
         ? { bank: text('co.payee_bank'), accountName: 'Delbros Leasing Inc.', accountNo: '', isDemo: false }
         : { bank: 'Demo Bank (replace before release)', accountName: 'Delbros Leasing Inc.', accountNo: '0000-0000-0000', branch: 'Head Office', isDemo: true },
+    // Timeline 2 review (Q-PTL-03): which extras the access request asks for.
+    registrationExtras: parseRegistrationExtras(settings()['portal.registration_extras'] ?? 'tin,documents,consent'),
   };
+}
+
+/**
+ * Timeline 2 review (pay-to account by entity — proposed, Treasury to confirm): the group has three entities. A client pays the entity that
+ * bills it: Nakamura for Mindanao branches, Delbros Leasing for the rest (KNEX bills no lease clients in the demo). Approved accounts come from
+ * app-config.json releaseContacts.payees.<DBL|NAK|KNX>; until then a clearly marked demo placeholder is shown.
+ */
+export const PAYEE_ENTITIES = { DBL: 'Delbros Leasing Inc.', NAK: 'Nakamura', KNX: 'KNEX' } as const;
+export type PayeeEntity = keyof typeof PAYEE_ENTITIES;
+export function payeeFor(clientCode?: string) {
+  const c = db.clients.find((x) => x.clientCode === clientCode);
+  const b = db.branches.find((x) => x.code === c?.branchCode);
+  const entity: PayeeEntity = b?.regionGroup === 'Mindanao' || b?.region === 'Mindanao' ? 'NAK' : 'DBL';
+  const approved = release.payees?.[entity] ?? (entity === 'DBL' && release.payee?.accountNo ? release.payee : undefined);
+  const base = approved?.accountNo ? { ...approved, isDemo: false } : entity === 'DBL' ? portalPolicy().payee : { bank: 'Demo Bank (replace before release)', accountName: PAYEE_ENTITIES[entity], accountNo: '0000-0000-0001', branch: 'Mindanao', isDemo: true };
+  return { ...base, entity, entityName: PAYEE_ENTITIES[entity], basis: entity === 'NAK' ? 'Your home branch is in Mindanao — billed by Nakamura' : 'Billed by Delbros Leasing' };
 }
 
 // ── Contacts ────────────────────────────────────────────────────────────────
@@ -266,7 +285,7 @@ const first9 = (t?: string) => tinDigits(t).slice(0, 9);
 export async function requestPortalAccess(f: ClientPortalForm) {
   await delay(400);
   const p = portalPolicy();
-  const parsed = portalAccessSchema(p.passwordMinLength).safeParse(f);
+  const parsed = portalAccessSchema(p.passwordMinLength, p.registrationExtras).safeParse(f);
   if (!parsed.success) {
     const fields = Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]));
     throw new ApiError('VALIDATION_FAILED', 'Check the highlighted fields.', 422, fields);
@@ -282,11 +301,11 @@ export async function requestPortalAccess(f: ClientPortalForm) {
   if (db.vendors.some((v) => v.email && normalizeEmail(v.email) === email))
     throw new ApiError('EMAIL_OTHER_COMPANY', 'This email is already on file for an existing Delbros supplier. One email can belong to only one company — contact Delbros Procurement, or use a different email.', 409, { email: 'Already on file for an existing supplier' });
 
-  // One TIN = one company (first 9 digits; the last digits are the BIR branch code).
+  // One TIN = one company (first 9 digits; the last digits are the BIR branch code). Skipped when the TIN is not asked for and left blank.
   const tin = first9(f.tin);
-  if (!vendor && (db.clients.some((c) => first9(c.tin) === tin) || db.accreditations.some((a) => first9(a.bici.tin) === tin)))
+  if (tin && !vendor && (db.clients.some((c) => first9(c.tin) === tin) || db.accreditations.some((a) => first9(a.bici.tin) === tin)))
     throw new ApiError('TIN_IN_USE', 'A client with this TIN is already registered. Ask your Account Executive to add you as a portal user instead of submitting a new request.', 409, { tin: 'A client with this TIN is already registered' });
-  if (vendor && db.vendors.some((v) => first9(v.tin) === tin))
+  if (tin && vendor && db.vendors.some((v) => first9(v.tin) === tin))
     throw new ApiError('TIN_IN_USE', 'A supplier with this TIN is already registered. Please contact Delbros Procurement.', 409, { tin: 'A supplier with this TIN is already registered' });
 
   const name = `${f.firstName.trim()} ${f.lastName.trim()}`;
@@ -309,14 +328,104 @@ export async function requestPortalAccess(f: ClientPortalForm) {
     });
     db.users.push({ userId: email, name, designation: `Client — ${f.clientName.trim()}`, status: 'Inactive', realm: 'CLIENT_PORTAL', clientCode: subjectId, branchCode: f.branchCode, branchAccess: [], email, roles: ['CLIENT'], password: f.password, failed: 0 });
     reviewer = accountExecutiveOf(subjectId);
-    notify('client.portal_registered', `New portal registration: ${f.clientName.trim()}`, `TIN ${f.tin.trim()} · ${f.documents.length} document(s). Review and approve, then submit for accreditation.`, { aeUserId: ae, link: `/clients/${subjectId}` });
+    notify('client.portal_registered', `New portal registration: ${f.clientName.trim()}`, `${f.tin.trim() ? `TIN ${f.tin.trim()} · ` : ''}${f.documents.length} document(s). Approve or deny from the one-click link in your email.`, { aeUserId: ae, link: `/clients/${subjectId}` });
   }
   const reference = nextNo('PAR', 'PAR-', 6);
+  // Timeline 2 review (DBL-CLT-019): the reviewer gets a single-use approval link; the applicant gets an acknowledgement. Both are logged.
+  const token = randomToken();
+  const reviewerUser = vendor ? undefined : db.users.find((u) => u.userId === db.clients.find((c) => c.clientCode === subjectId)?.aeAssigned);
+  const reviewerEmail = vendor ? (p.support.vendor.email || 'procurement@demo.delbros.local') : reviewerUser?.email ?? '';
+  const link = `/access-approval/${token}`;
+  const notices: AccessNotice[] = [
+    { at: submittedAt, audience: vendor ? 'Procurement' : 'Account Executive', channel: 'Email', to: reviewerEmail, subject: `Approve portal access — ${f.clientName.trim()} (${reference})`, link, status: 'Queued' },
+    { at: submittedAt, audience: 'Applicant', channel: 'Email', to: email, subject: `We received your portal access request — ${reference}`, status: 'Queued' },
+  ];
   (db.accessRequests ??= []).unshift({
     reference, accountType: f.accountType, subjectId, companyName: f.clientName.trim(), tin: f.tin.trim(), branchCode: f.branchCode, address: f.address1.trim(),
     contactName: name, email, phone: f.phone.trim(), documents: [...f.documents], submittedAt, status: 'Submitted', reviewer: reviewer.name ?? reviewer.role,
+    approvalToken: token, approvalExpiresAt: addDays(submittedAt, num('portal.access_link_days', 7)), reviewerUserId: reviewerUser?.userId, notices,
   });
-  audit(vendor ? 'vendor.portal_registered' : 'client.portal_registered', vendor ? 'vendor' : 'client', subjectId, { reference, companyName: f.clientName.trim(), tin: f.tin.trim(), documents: f.documents });
+  audit(vendor ? 'vendor.portal_registered' : 'client.portal_registered', vendor ? 'vendor' : 'client', subjectId, { reference, companyName: f.clientName.trim(), tin: f.tin.trim(), documents: f.documents, notices: notices.map((n) => `${n.audience}: ${n.to}`) });
   persist();
-  return { reference, accountType: f.accountType, subjectId, email, submittedAt, reviewer, companyName: f.clientName.trim(), tin: f.tin.trim(), branchCode: f.branchCode, contactName: name, phone: f.phone.trim(), documents: [...f.documents] };
+  return { reference, accountType: f.accountType, subjectId, email, submittedAt, reviewer, companyName: f.clientName.trim(), tin: f.tin.trim(), branchCode: f.branchCode, contactName: name, phone: f.phone.trim(), documents: [...f.documents],
+    status: 'Submitted' as const, statusLabel: statusLabelOf('Submitted', f.accountType), notices: notices.map(({ link: _l, ...n }) => n) };
+}
+
+// ── Timeline 2 review: access request status, and the reviewer's one-click approval link ──
+const statusLabelOf = (s: AccessRequest['status'], type: AccessRequest['accountType']) => (s === 'Approved' ? 'Approved' : s === 'Rejected' ? 'Denied' : type === 'vendor' ? 'Pending Procurement approval' : 'Pending AE approval');
+const findRequest = (reference: string) => (db.accessRequests ?? []).find((r) => r.reference.toUpperCase() === reference.trim().toUpperCase());
+const applicantNotices = (r: AccessRequest) => (r.notices ?? []).filter((n) => n.audience === 'Applicant').map(({ link: _l, ...n }) => n);
+
+/** Applicant checks a request with its reference and the email it was sent from (both must match — nothing is revealed otherwise). */
+export async function accessRequestStatus(reference: string, email: string) {
+  await delay(200);
+  const r = findRequest(reference);
+  if (!r || normalizeEmail(r.email) !== normalizeEmail(email)) throw new ApiError('NOT_FOUND', 'No request matches this reference and email. Check both and try again.', 404);
+  const vendor = r.accountType === 'vendor';
+  return {
+    reference: r.reference, accountType: r.accountType, companyName: r.companyName, submittedAt: r.submittedAt, status: r.status, statusLabel: statusLabelOf(r.status, r.accountType),
+    reviewer: r.reviewer, reviewerNotified: (r.notices ?? []).some((n) => n.audience !== 'Applicant' && n.status !== 'Failed'),
+    companyCode: r.status === 'Approved' && !vendor ? r.subjectId : undefined, billingName: r.status === 'Approved' ? r.billingName : undefined,
+    reason: r.status === 'Rejected' ? r.decisionReason : undefined, decidedAt: r.decidedAt, notices: applicantNotices(r),
+    nextStep: r.status === 'Approved' ? (vendor ? 'Procurement completes your supplier accreditation; you can then sign in.' : 'Accreditation (Credit & Collection → Finance → Vice President). You can sign in and will see the accreditation stage.')
+      : r.status === 'Rejected' ? 'You may submit a new request with the corrected details.' : `Waiting for ${r.reviewer} to approve. You will be emailed the decision.`,
+  };
+}
+
+function liveApproval(token: string) {
+  const r = (db.accessRequests ?? []).find((x) => x.approvalToken && x.approvalToken === token);
+  if (!r) throw new ApiError('APPROVAL_LINK_INVALID', 'This approval link is not valid. It may be incomplete — open it from the email again.', 404);
+  return r;
+}
+/** The reviewer opens the emailed link: request details, documents and who fills which field. Still readable after the decision. */
+export async function checkApprovalLink(token: string) {
+  await delay(150);
+  const r = liveApproval(token);
+  return {
+    reference: r.reference, accountType: r.accountType, companyName: r.companyName, tin: r.tin, branchCode: r.branchCode, address: r.address, contactName: r.contactName, email: r.email, phone: r.phone,
+    documents: r.documents, submittedAt: r.submittedAt, status: r.status, statusLabel: statusLabelOf(r.status, r.accountType), reviewer: r.reviewer,
+    companyCode: r.accountType === 'client' ? r.subjectId : undefined, billingName: r.billingName ?? r.companyName, expiresAt: r.approvalExpiresAt,
+    expired: r.status === 'Submitted' && !!r.approvalExpiresAt && Date.parse(r.approvalExpiresAt) < Date.now(),
+    decidedAt: r.decidedAt, decidedBy: r.decidedBy, decisionReason: r.decisionReason,
+  };
+}
+/**
+ * One click from the email (DBL-CLT-019): approve — the AE enters the billing name, the portal user is activated and the applicant is told the
+ * company code; or deny with a reason — the applicant is told, and the draft company and user are removed so they can apply again.
+ * Single use: a decided link cannot decide again.
+ */
+export async function decidePortalAccess(token: string, d: { decision: 'approve' | 'deny'; billingName?: string; reason?: string }) {
+  await delay(300);
+  const r = liveApproval(token);
+  if (r.status !== 'Submitted') throw new ApiError('ALREADY_DECIDED', `${r.reference} was already ${r.status === 'Approved' ? 'approved' : 'denied'} on ${formatDateTime(r.decidedAt)}. The link works once.`, 409);
+  if (r.approvalExpiresAt && Date.parse(r.approvalExpiresAt) < Date.now()) throw new ApiError('APPROVAL_LINK_EXPIRED', `This approval link expired on ${formatDateTime(r.approvalExpiresAt)}. Open the request from the staff app instead.`, 410);
+  const vendor = r.accountType === 'vendor';
+  if (d.decision === 'approve' && !vendor && !d.billingName?.trim()) throw new ApiError('VALIDATION_FAILED', 'Enter the billing name printed on invoices.', 422, { billingName: 'Required' });
+  if (d.decision === 'deny' && (d.reason?.trim().length ?? 0) < 10) throw new ApiError('VALIDATION_FAILED', 'Tell the applicant why (at least 10 characters).', 422, { reason: 'At least 10 characters' });
+  const reviewer = db.users.find((u) => u.userId === r.reviewerUserId);
+  const by = reviewer?.name ?? r.reviewer;
+  const at = nowIso();
+  const as = { actor: reviewer?.userId ?? (vendor ? 'PROCUREMENT' : 'AE'), actorRole: vendor ? 'APS_OFFICER' : 'ACCOUNT_EXECUTIVE', source: 'One-click approval link (email)' };
+  const user = db.users.find((u) => normalizeEmail(u.userId) === normalizeEmail(r.email));
+  let notice: AccessNotice;
+  if (d.decision === 'approve') {
+    r.status = 'Approved';
+    if (user) user.status = 'Active';
+    if (!vendor) { const c = db.clients.find((x) => x.clientCode === r.subjectId); if (c) c.billingName = d.billingName!.trim(); r.billingName = d.billingName!.trim(); }
+    notice = { at, audience: 'Applicant', channel: 'Email', to: r.email, subject: `Portal access approved — ${r.reference}`, status: 'Queued' };
+    audit(vendor ? 'vendor.portal_access_approved' : 'client.portal_access_approved', vendor ? 'vendor' : 'client', r.subjectId, { reference: r.reference, billingName: r.billingName, userActivated: !!user }, undefined, { status: 'Submitted' }, as);
+  } else {
+    r.status = 'Rejected'; r.decisionReason = d.reason!.trim();
+    // The draft company and its inactive user are removed, so the same email and TIN can apply again.
+    db.users = db.users.filter((u) => u !== user);
+    if (vendor) db.vendors = db.vendors.filter((v) => v.vendorId !== r.subjectId || v.status !== 'Pending');
+    else db.clients = db.clients.filter((c) => c.clientCode !== r.subjectId || c.status !== 'Draft');
+    notice = { at, audience: 'Applicant', channel: 'Email', to: r.email, subject: `Portal access request not approved — ${r.reference}`, status: 'Queued' };
+    audit(vendor ? 'vendor.portal_access_denied' : 'client.portal_access_denied', vendor ? 'vendor' : 'client', r.subjectId, { reference: r.reference }, r.decisionReason, { status: 'Submitted' }, as);
+  }
+  r.decidedAt = at; r.decidedBy = by;
+  (r.notices ??= []).push(notice);
+  persist();
+  return { reference: r.reference, status: r.status, statusLabel: statusLabelOf(r.status, r.accountType), decidedAt: at, decidedBy: by, billingName: r.billingName, companyCode: vendor ? undefined : r.subjectId,
+    reason: r.decisionReason, applicantNotice: notice };
 }

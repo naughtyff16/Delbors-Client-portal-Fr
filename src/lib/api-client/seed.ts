@@ -2,17 +2,23 @@
 // development and UI review — they are NOT Delbros master data. Equipment types in particular are not named
 // in the BRD or design brief (Q-CLT-01) and must be replaced from the DelWater Online extract.
 import {
-  DEFAULT_SETTINGS, addDays, addHours, formatDate, formatPhp, manilaDay,
+  DEFAULT_SETTINGS, addDays, addHours, daysSinceWeekday, formatDate, formatDateTime, formatPhp, manilaDay, overlapDays, round2, weeklyCycle,
   type Branch, type Chassis, type Client, type Contract, type EquipmentType, type Invoice, type NotificationRule,
   type Registration, type RoleCode, type User, type WorkflowInstance, type ChassisStatus, type Part, type EwaDelivery,
 } from '../shared';
 import type { Db } from './db';
 
-const now = () => new Date().toISOString();
+// One clock reading for the whole seed, so related records (an EWA and its Audit log rows, a rescue and its status log) carry identical times.
+let seedNow: string | undefined;
+const now = () => seedNow ?? new Date().toISOString();
 const ago = (d: number) => addDays(now(), -d);
 const ahead = (d: number) => addDays(now(), d);
 
 export function buildSeed(): Db {
+  seedNow = new Date().toISOString();
+  try { return buildSeedAt(); } finally { seedNow = undefined; }
+}
+function buildSeedAt(): Db {
   const branches: Branch[] = [
     // Gate pass numbers follow the FRS format (GEN0001 / CEB0001): branch prefix + 4 digits (gat.gatepass_seq_digits, Q-GAT-07). Portal dashboard review 2026-11-11.
     { code: 'HO', name: 'Head Office', region: 'NCR', gatePassPrefix: 'HO', isHeadOffice: true },
@@ -39,6 +45,8 @@ export function buildSeed(): Db {
     mk('ADMIN', 'System Administrator', 'IT Administrator', ['SYS_ADMIN']),
     mk('BG.MNL', 'Rocky Santos', 'Branch Generalist', ['BRANCH_GENERALIST'], 'MNL', { warehouseCode: 'WH-MNL' }),
     mk('BG.CEB', 'Ana Villanueva', 'Branch Generalist', ['BRANCH_GENERALIST'], 'CEB', { warehouseCode: 'WH-CEB' }),
+    // Timeline 2 review: the Cavite branch user who cancelled EU-000765 (a CAV EWA) — the Audit log now names a Cavite actor.
+    mk('BG.CAV', 'Noel Bautista', 'Branch Generalist', ['BRANCH_GENERALIST'], 'CAV'),
     mk('DYM.MNL', 'Carlos Mendoza', 'Deputy Yard Manager', ['DYM'], 'MNL'),
     mk('RM.NCR', 'Liza Gomez', 'Regional Manager', ['REGIONAL_MANAGER'], 'HO'),
     mk('OPSMGR', 'Paolo Reyes', 'Operations Manager', ['OPS_MANAGER', 'RESCUE_COORDINATOR']),
@@ -72,6 +80,8 @@ export function buildSeed(): Db {
     { ...mk('sales@luzonbrake.ph', 'Luzon Brake & Axle Trading', 'Vendor', ['VENDOR']), realm: 'VENDOR_PORTAL', vendorId: 'V-005', branchAccess: [] }, // vendor accreditation pending
     { ...mk('orders@metropaint.ph', 'Metro Paint Supply', 'Vendor', ['VENDOR']), realm: 'VENDOR_PORTAL', vendorId: 'V-004', branchAccess: [] }, // vendor deactivated by APS
     { ...mk('finance@baysidehaulage.ph', 'Carla Mendoza', 'Client — Bayside Haulage', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00262', branchAccess: [] }, // contract ended, cash bond refundable
+    // Timeline 2 review: a safe test account for the rescue eligibility case "e-wallet below the minimum" (units on hire, rescue accepted with a warning).
+    { ...mk('ops@metrocontainer.ph', 'Pedro Penduko', 'Client — Metro Container Lines', ['CLIENT']), realm: 'CLIENT_PORTAL', clientCode: 'C-00230', branchAccess: [] },
   ];
 
   // Portal users sign in with their email: the user ID and the email are the same address (one email = one company).
@@ -139,14 +149,20 @@ export function buildSeed(): Db {
     abc.version = 2;
     abc.versions = [{ version: 2, at: v2At, by: 'AE.JREYES', reason: '20ft flatbed rate aligned to the 2026 LTL rate card' }];
     abc.history?.push({ status: 'Amended → v2', at: v2At, by: 'AE.JREYES', note: '20ft flatbed ₱1,150 → ₱1,250 per day (2026 LTL rate card)' });
+    abc.renewal = { state: 'Decision pending', note: 'Renewal notices start 3 months before the end date; the client decides by the 1-month notice (DBL-CLT-011).' };
     // Earlier contracts: one ran to its end, one was ended early when ABC moved to the long-term lease.
     const q = contracts.find((c) => c.contractNo === 'QLP-2025-0019')!;
     Object.assign(q, { effectiveDate: manilaDay(ago(420)), expiryDate: manilaDay(ago(241)), unitQty: 4, createdAt: ago(425), signatoryId: 'C-00123-1',
       rates: q.rates.map((r, i) => ({ ...r, qty: i < 2 ? 2 : 0 })), entitlementByType: true,
-      history: [{ status: 'Active', at: ago(420), by: 'AE.JREYES' }, { status: 'Expired', at: ago(240), by: 'system', note: 'End date reached' }],
+      history: [{ status: 'Active', at: ago(420), by: 'AE.JREYES' }, { status: 'Renewal notice — 1 month', at: ago(271), by: 'system' }, { status: 'Expired', at: ago(240), by: 'system', note: 'End date reached' }],
+      cashDeposit: 15000,
+      // Timeline 2 review: renewal state on the inactive contract — ABC declined the QLP renewal and signed a long-term lease instead.
+      renewal: { state: 'Not renewed', date: manilaDay(ago(250)), decidedBy: 'AE.JREYES', note: 'Client declined a QLP renewal at the 1-month notice and signed the long-term lease LTL-2026-0045 instead.', successor: 'LTL-2026-0045' },
       documents: [{ kind: 'Signed copy', fileName: 'QLP-2025-0019-signed.pdf', at: ago(423), by: 'AE.JREYES' }] });
     const t = contracts.find((c) => c.contractNo === 'SPL-2025-0007')!;
-    Object.assign(t, { effectiveDate: manilaDay(ago(560)), unitQty: 3, createdAt: ago(565), lockInMonths: 0,
+    Object.assign(t, { effectiveDate: manilaDay(ago(560)), unitQty: 3, createdAt: ago(565), lockInMonths: 0, cashDeposit: 10000,
+      // Spot List has no contractual expiry (BR-12): the date shown is the termination date. Replaced by the long-term lease.
+      renewal: { state: 'Replaced by a new contract', date: manilaDay(ago(201)), decidedBy: 'SALESDIR', note: 'Terminated early by agreement; all units moved to LTL-2026-0045. Spot List contracts have no renewal date.', successor: 'LTL-2026-0045' },
       termination: { workflowId: 'WF-CTT-1', reason: 'Moved all units to the long-term lease LTL-2026-0045', status: 'Approved', effectiveDate: manilaDay(ago(201)) },
       history: [{ status: 'Active', at: ago(560), by: 'AE.JREYES' }, { status: 'Termination requested', at: ago(215), by: 'AE.JREYES', note: 'Client moving to LTL-2026-0045' }, { status: 'Terminated', at: ago(201), by: 'SALESDIR', note: 'Approved — no pre-termination fee (no lock-in)' }],
       documents: [{ kind: 'Signed copy', fileName: 'SPL-2025-0007-signed.pdf', at: ago(562), by: 'AE.JREYES' }] });
@@ -292,9 +308,10 @@ export function buildSeed(): Db {
     const cl = clients.find((c) => c.clientCode === clientCode)!; const ct = contracts.find((c) => c.contractNo === contractNo)!;
     for (const k in pick) delete pick[k]; // same units on each weekly invoice of a client
     const len = cl.billingCycle === 'Monthly' ? 30 : 7; const ps = ago(daysAgoIssued + len), pe = ago(daysAgoIssued + 1);
+    // Timeline 2 review: every line's from–to sits inside the billed period (it used to start weeks earlier).
     const lines: Invoice['lines'] = units.map(([eq, days], k) => {
       const u = unitOf(eq, branchCode); const rate = ct.rates[eq].dailyRate;
-      return { id: `${no}-${k + 1}`, lineType: 'Lease', description: `Chassis lease — ${equipmentTypes[eq].name}`, equipmentType: equipmentTypes[eq].code, chassisNo: u.chassisNo, from: addDays(ps, -20 - k * 3), to: days < len ? addDays(ps, days - 1) : undefined, days, rate, rateType: 'Daily — contract snapshot', amount: days * rate };
+      return { id: `${no}-${k + 1}`, lineType: 'Lease', description: `Chassis lease — ${equipmentTypes[eq].name}`, equipmentType: equipmentTypes[eq].code, chassisNo: u.chassisNo, from: `${manilaDay(ps)}T12:00:00+08:00`, to: `${manilaDay(addDays(ps, Math.min(days, len) - 1))}T12:00:00+08:00`, days, rate, rateType: 'Daily — contract snapshot', amount: days * rate };
     });
     const subtotal = lines.reduce((a, l) => a + l.amount, 0), vat = Math.round(subtotal * 0.12 * 100) / 100;
     const issuedAt = ago(daysAgoIssued);
@@ -308,15 +325,42 @@ export function buildSeed(): Db {
       ...o,
     };
   };
+  // ── Timeline 2 review (INV-MNL-00001119): ABC's weekly lease invoices are built from its actual hire lines — every unit released under
+  // LTL-2026-0045 (Gate Out → Gate In, or still on hire), billed for the days it was out inside the week (pickup and return day count),
+  // at the contract rate of its own (entitled) type. Weeks follow fin.weekly_cycle_start (proposed Friday–Thursday); the invoice is dated
+  // the first day of the next week. Replaces the earlier sample mix (₱42,000 a week, lines dated before the week, repeated units).
+  const wk = weeklyCycle(String(DEFAULT_SETTINGS.find((s) => s.key === 'fin.weekly_cycle_start')?.value ?? 'Friday'));
+  const k0 = daysSinceWeekday(manilaDay(now()), wk.startIndex); // days since the latest invoice date
+  const hireLines = (no: string, clientCode: string, contractNo: string, periodStart: string, periodEnd: string): Invoice['lines'] => {
+    const ct = contracts.find((c) => c.contractNo === contractNo)!;
+    return gatePasses
+      .filter((g) => g.direction === 'OUT' && g.clientCode === clientCode && g.contractNo === contractNo)
+      .map((g) => ({ g, o: overlapDays(manilaDay(g.actualEventAt), ((b) => (b ? manilaDay(b.actualEventAt) : undefined))(gatePasses.find((x) => x.direction === 'IN' && x.gatePassNo === g.pairedGatePassNo)), periodStart, periodEnd) }))
+      .filter((x): x is { g: (typeof gatePasses)[number]; o: NonNullable<ReturnType<typeof overlapDays>> } => !!x.o)
+      .sort((a, b) => a.g.actualEventAt.localeCompare(b.g.actualEventAt))
+      .map(({ g, o }, k) => {
+        const type = chassis.find((c) => c.chassisNo === g.chassisNo)!.chassisType;
+        const rate = ct.rates.find((r) => r.equipmentType === type)!.dailyRate;
+        return { id: `${no}-${k + 1}`, lineType: 'Lease' as const, description: `Chassis lease — ${equipmentTypes.find((e) => e.code === type)!.name}`, equipmentType: type, chassisNo: g.chassisNo,
+          from: `${o.from}T12:00:00+08:00`, to: `${o.to}T12:00:00+08:00`, days: o.days, rate, rateType: 'Daily — contract snapshot', amount: o.days * rate, reason: `Gate Out ${g.gatePassNo}${g.pairedGatePassNo ? ` · Gate In ${g.pairedGatePassNo}` : ' · still on hire'}` };
+      });
+  };
+  const leaseFromHires = (no: string, daysAgoIssued: number, paid: number): Invoice => {
+    const base = inv(no, 'C-00123', 'LTL-2026-0045', daysAgoIssued, [], paid);
+    const lines = hireLines(no, 'C-00123', 'LTL-2026-0045', base.periodStart, base.periodEnd);
+    const subtotal = round2(lines.reduce((a, l) => a + l.amount, 0)), vat = round2(subtotal * 0.12);
+    return { ...base, lines, subtotal, vat, total: round2(subtotal + vat) };
+  };
   const invoices: Invoice[] = [
-    inv('INV-MNL-00001101', 'C-00123', 'LTL-2026-0045', 20, [[7, 7], [7, 7], [6, 7], [5, 7], [5, 7]], 0),
-    inv('INV-MNL-00001102', 'C-00123', 'LTL-2026-0045', 13, [[7, 7], [7, 7], [6, 7], [5, 7], [5, 7]], 20000),
+    leaseFromHires('INV-MNL-00001101', k0 + 14, 0),
+    leaseFromHires('INV-MNL-00001102', k0 + 7, 20000),
     inv('INV-MNL-00001050', 'C-00188', 'SPL-2026-0012', 75, [[0, 30], [1, 30], [2, 30], [3, 30], [4, 30]], 0),
     inv('INV-MNL-00001068', 'C-00188', 'SPL-2026-0012', 45, [[3, 30], [1, 30], [1, 20]], 0),
     inv('INV-CEB-00000310', 'C-00201', 'LTL-2026-0051', 10, [[3, 7], [4, 7], [5, 7], [6, 7], [7, 7]], 43120, 'CEB', { heldReason: 'Awaiting late-encoding credit memo CM-000009 approval (BR-05) — Deputy Yard Manager + Treasury' }),
     inv('INV-BTG-00000122', 'C-00215', 'QLP-2026-0007', 50, [[0, 30], [4, 20]], 30000, 'BTG'),
     inv('INV-MNL-00001120', 'C-00230', 'LTL-2026-0060', 5, [[0, 7], [1, 7], [2, 7], [2, 7], [3, 7], [3, 7], [6, 3]], 0),
   ];
+  const cm10 = { net: 0, amount: 0, balanceAfter: 0 }; // CM-000010 — 2% of INV-MNL-00001101's net, set below
   {
     // BR-05: the late-encoded Visayas unit (LE-00099, 9 days, WF-LE-1) is held on its invoice — excluded from the totals until CM-000009 is approved.
     const m = invoices[4]; const gp = gatePasses[2];
@@ -331,19 +375,22 @@ export function buildSeed(): Db {
     invoices.push(
       // A one-off repair bill covers the gate-in day it was found, not a weekly lease period (review 1.1: no overlap with INV-MNL-00001102).
       // Portal invoice review: this is not a lease bill — it bills the damage found at the MNL0881 Gate In (35 days ago): ₱4,500 + 12% VAT = ₱5,040.
-      one('INV-MNL-00001118', 'C-00123', 'LTL-2026-0045', 8, 'Repair', { id: '', lineType: 'Damage', description: 'Chargeable damage — tail lamp + wiring (EIR-MNL-000181, Gate In MNL0881)', chassisNo: chassis[0].chassisNo, from: ago(35), to: ago(35), rateType: 'Fixed — EIR chargeable', amount: 4500 }, 0, 'MNL', { periodStart: manilaDay(ago(35)), periodEnd: manilaDay(ago(35)) }),
+      one('INV-MNL-00001118', 'C-00123', 'LTL-2026-0045', k0 + 2, 'Repair', { id: '', lineType: 'Damage', description: 'Chargeable damage — tail lamp + wiring (EIR-MNL-000181, Gate In MNL0881)', chassisNo: chassis[0].chassisNo, from: ago(35), to: ago(35), rateType: 'Fixed — EIR chargeable', amount: 4500 }, 0, 'MNL', { periodStart: manilaDay(ago(35)), periodEnd: manilaDay(ago(35)) }),
       one('INV-CEB-00000315', 'C-00201', 'LTL-2026-0051', 3, 'GPS', { id: '', lineType: 'GPS', description: 'GPS tracking fee — 2 units × 1 month', days: 2, rate: 500, rateType: 'Monthly per unit (proposed, DBL-FIN-010)', amount: 1000 }, 0, 'CEB'),
       one('INV-MNL-00001105', 'C-00230', 'LTL-2026-0060', 18, 'Special', { id: '', lineType: 'Special', description: 'Special billing — weekend yard handling', rateType: 'Fixed — special billing', amount: 2000, reason: 'Client request (DBL-FIN-004)' }, 0, 'MNL', { credited: 2240 }),
       // Numbered right after INV-MNL-00001102: the duplicate came out of the same billing run (review 1.1: numbers follow issue dates).
-      one('INV-MNL-00001103', 'C-00123', 'LTL-2026-0045', 13, 'Lease', { id: '', lineType: 'Lease', description: 'Duplicate of INV-MNL-00001102 (same client & period)', amount: 42000 }, 0, 'MNL', { status: 'Cancelled', cancelReason: 'Billing batch conflict — duplicate of INV-MNL-00001102' }),
+      one('INV-MNL-00001103', 'C-00123', 'LTL-2026-0045', k0 + 7, 'Lease', { id: '', lineType: 'Lease', description: 'Duplicate of INV-MNL-00001102 (same client & period)', amount: invoices[1].subtotal }, 0, 'MNL', { status: 'Cancelled', cancelReason: 'Billing batch conflict — duplicate of INV-MNL-00001102' }),
     );
-    invoices[invoices.length - 1].history?.push({ at: ago(12), by: 'FINMGR', action: 'Cancelled', note: 'Billing batch conflict — duplicate of INV-MNL-00001102' });
+    invoices[invoices.length - 1].history?.push({ at: ago(k0 + 6), by: 'FINMGR', action: 'Cancelled', note: 'Billing batch conflict — duplicate of INV-MNL-00001102' });
     invoices[invoices.length - 2].history?.push({ at: ago(10), by: 'FINMGR', action: 'Credited', note: 'CM-000008 applied (no-rescue service dispute)' });
     // Portal invoice review: the weekly lease bill that follows INV-MNL-00001102 — billing periods now run without a gap.
-    invoices.push(inv('INV-MNL-00001119', 'C-00123', 'LTL-2026-0045', 6, [[7, 7], [7, 7], [6, 7], [5, 7], [5, 7]], 0));
-    // BR-05 / review: CM-000010 (2% creditable withholding tax, BIR 2307) applied to INV-MNL-00001101 — shown as a Credit Memo row on the SOA.
+    invoices.push(leaseFromHires('INV-MNL-00001119', k0, 0));
+    // BR-05 / review: CM-000010 (2% creditable withholding tax, BIR 2307, on the net) applied to INV-MNL-00001101 — shown as a Credit Memo row on the SOA.
     const i1101 = invoices.find((i) => i.invoiceNo === 'INV-MNL-00001101');
-    if (i1101) { i1101.credited = 840; i1101.history?.push({ at: ago(2), by: 'ACCTG', action: 'Credited', note: 'CM-000010 applied (withholding tax, BIR 2307)' }); }
+    if (i1101) {
+      cm10.net = i1101.subtotal; cm10.amount = round2(i1101.subtotal * 0.02); cm10.balanceAfter = round2(i1101.total - cm10.amount);
+      i1101.credited = cm10.amount; i1101.history?.push({ at: ago(2), by: 'ACCTG', action: 'Credited', note: 'CM-000010 applied (withholding tax, BIR 2307)' });
+    }
   }
 
   const parts: Part[] = [
@@ -424,6 +471,10 @@ export function buildSeed(): Db {
     // Gate (SCR-14/18 review): populated extension and late-encoding approval examples.
     wf({ id: 'WF-EWX-1', matrixCode: 'EWA_EXTENSION', title: 'EWA extension — EU-000776', subjectType: 'ewa', subjectId: 'EU-000776', requestedBy: 'AE.JREYES', requestedAt: addHours(now(), -2), steps: [
       { step: 1, label: 'Manager approval', roles: ['DYM', 'REGIONAL_MANAGER', 'OPS_MANAGER'], decision: 'Pending', dueAt: ahead(1) }, { step: 2, label: 'IT / authorised revalidation', roles: ['SYS_ADMIN'], decision: 'Pending' }] }),
+    // Timeline 2 review: ABC's EU-000770 extension — manager approved, waiting for IT revalidation (the client sees "Extension requested").
+    wf({ id: 'WF-EWX-3', matrixCode: 'EWA_EXTENSION', title: 'EWA extension — EU-000770 (ABC Logistics)', subjectType: 'ewa', subjectId: 'EU-000770', requestedBy: 'client@abclogistics.ph', requestedAt: addHours(now(), -14), currentStep: 1, steps: [
+      { step: 1, label: 'Manager approval', roles: ['DYM', 'REGIONAL_MANAGER', 'OPS_MANAGER'], decision: 'Approved', decidedBy: 'DYM.MNL', decidedAt: addHours(now(), -12), comment: 'DYM.MNL:DYM:Customs hold confirmed with the port — extend 24 h|' },
+      { step: 2, label: 'IT / authorised revalidation', roles: ['SYS_ADMIN'], decision: 'Pending', dueAt: addHours(now(), 12) }] }),
     wf({ id: 'WF-LE-1', matrixCode: 'LATE_ENCODING_CM', title: `Late encoding 9 days — ${gatePasses[2]?.gatePassNo}`, subjectType: 'gatepass', subjectId: gatePasses[2]?.gatePassNo ?? '', requestedBy: 'BG.MNL', branchCode: gatePasses[2]?.branchCode, steps: [
       { step: 1, label: 'Deputy Yard Manager', roles: ['DYM'], decision: 'Pending', dueAt: ahead(1) }, { step: 2, label: 'Treasury', roles: ['TREASURY'], decision: 'Pending' }] }),
   ];
@@ -484,15 +535,15 @@ export function buildSeed(): Db {
   workflows.push(
     memoWf('WF-CM-7', 'CM-000007', 'Credit memo CM-000007 — Southern Haulers Co.', 3000, 'Rejected', [billStep('Finance Manager', ['FINANCE_MANAGER'], 'Rejected', 'FINMGR', ago(18), 'No evidence of overbilling — rates match contract snapshot')], ago(19)),
     memoWf('WF-CM-8', 'CM-000008', 'Credit memo CM-000008 — Metro Container Lines', 2240, 'Approved', [billStep('Finance Manager', ['FINANCE_MANAGER'], 'Approved', 'FINMGR', ago(10), 'Dispute upheld')], ago(11)),
-    memoWf('WF-CM-10', 'CM-000010', 'Credit memo CM-000010 — ABC Logistics Inc.', 840, 'Approved', [billStep('Finance Manager', ['FINANCE_MANAGER'], 'Approved', 'FINMGR', ago(2), 'BIR 2307 received')], ago(3)),
+    memoWf('WF-CM-10', 'CM-000010', 'Credit memo CM-000010 — ABC Logistics Inc.', cm10.amount, 'Approved', [billStep('Finance Manager', ['FINANCE_MANAGER'], 'Approved', 'FINMGR', ago(2), 'BIR 2307 received')], ago(3)),
     memoWf('WF-DM-37', 'DM-000037', 'Debit memo DM-000037 — Pacific Movers Corp.', 2500, 'Pending', [billStep('Finance Manager', ['FINANCE_MANAGER'], 'Pending')], ago(9)),
   );
   const leWf = workflows.find((w) => w.id === 'WF-LE-1');
   if (leWf) { leWf.steps[0] = { ...leWf.steps[0], decision: 'Approved', decidedBy: 'DYM.MNL', decidedAt: ago(0.5), comment: 'DYM.MNL:DYM:Outage report verified|' }; leWf.currentStep = 1; leWf.steps[1].dueAt = ahead(1.5); }
   const leHeld = invoices[4].lines.find((l) => l.held);
   const billingMemos: Db['memos'] = [
-    { memoNo: 'CM-000010', type: 'Credit', clientCode: 'C-00123', referenceInvoiceNo: 'INV-MNL-00001101', referenceType: 'Invoice', amount: 840, reason: 'Creditable withholding tax (2% of ₱42,000) on INV-MNL-00001101 — BIR Form 2307 received', category: 'Withholding-tax adjustment', status: 'Applied', workflowId: 'WF-CM-10',
-      createdAt: ago(3), createdBy: 'ACCTG', source: 'Manual', evidence: ['BIR-2307-ABC-2026Q3.pdf'], approvalChain: ['Finance Manager'], appliedTo: 'INV-MNL-00001101', appliedAt: ago(2), balanceAfter: 46200 },
+    { memoNo: 'CM-000010', type: 'Credit', clientCode: 'C-00123', referenceInvoiceNo: 'INV-MNL-00001101', referenceType: 'Invoice', amount: cm10.amount, reason: `Creditable withholding tax (2% of ${formatPhp(cm10.net)} net) on INV-MNL-00001101 — BIR Form 2307 received`, category: 'Withholding-tax adjustment', status: 'Applied', workflowId: 'WF-CM-10',
+      createdAt: ago(3), createdBy: 'ACCTG', source: 'Manual', evidence: ['BIR-2307-ABC-2026Q3.pdf'], approvalChain: ['Finance Manager'], appliedTo: 'INV-MNL-00001101', appliedAt: ago(2), balanceAfter: cm10.balanceAfter },
     { memoNo: 'CM-000009', type: 'Credit', clientCode: 'C-00201', referenceInvoiceNo: 'INV-CEB-00000310', referenceType: 'Late Encoding', referenceId: 'LE-00099', amount: leHeld?.amount ?? 0, reason: 'Late encoding 9 days — bill the held unit from the actual gate-out date (BR-05)',
       category: 'Late-encoding correction', status: 'Pending Approval', workflowId: 'WF-LE-1', createdAt: ago(1), createdBy: 'BG.MNL', source: 'Auto', evidence: ['outage-report-ITSR-0142.pdf'], approvalChain: ['Deputy Yard Manager', 'Treasury'] },
     { memoNo: 'CM-000008', type: 'Credit', clientCode: 'C-00230', referenceInvoiceNo: 'INV-MNL-00001105', referenceType: 'Invoice', amount: 2240, reason: 'Special billing disputed — handling was covered by the rescue already charged', category: 'No-rescue service dispute', status: 'Applied',
@@ -552,8 +603,12 @@ export function buildSeed(): Db {
   const inRepair = chassis.find((c) => c.status === 'In Repair')!;
 
   // Portal Rescue review (2026-11-11): one ABC unit is under rescue (RSC-000042, Dispatched); who is told about a new request.
-  const rsc42Unit = onHire.filter((c) => c.currentClientCode === 'C-00123')[2];
+  const abcUnits = onHire.filter((c) => c.currentClientCode === 'C-00123');
+  const rsc42Unit = abcUnits[2];
   if (rsc42Unit) { rsc42Unit.status = 'Rescue'; rsc42Unit.statusSince = addHours(now(), -0.55); }
+  // Timeline 2 review: client status notices (in-app + email) for Confirmed, Dispatched with ETA and Completed, as the API now sends them.
+  const clientNotice = (at: string, event: string, subject: string) => (['In-app', 'Email'] as const)
+    .map((channel) => ({ at, event, subject, channel, audience: 'Client' as const, recipient: 'Maria Santos', to: 'client@abclogistics.ph', status: 'Sent' as const }));
   const rescueNotes = (at: string, urgent: boolean, branch = 'MNL'): EwaDelivery[] => ([
     ['Delbros', 'Paolo Reyes — dispatcher', 'opsmgr@demo.delbros.local', 'Email'], ...(urgent ? [['Delbros', 'Paolo Reyes — dispatcher', '+63 917 000 0000', 'SMS']] : []),
     ['Delbros', 'Grace Lim — Credit & Collection (eligibility check)', 'cnc.off1@demo.delbros.local', 'Email'], ...(branch === 'MNL' ? [['Delbros', 'Rocky Santos — Branch Generalist, MNL', 'bg.mnl@demo.delbros.local', 'Email']] as const : []),
@@ -568,11 +623,15 @@ export function buildSeed(): Db {
     const back = gatePasses.filter((g) => g.clientCode === 'C-00123' && g.direction === 'IN').sort((a, b) => b.actualEventAt.localeCompare(a.actualEventAt));
     const due1101 = invoices.find((i) => i.invoiceNo === 'INV-MNL-00001101');
     return [
+      // Timeline 2 review: the client's rescue status notices (Confirmed, Dispatched with ETA, Completed).
+      note('N-CL-12', addHours(now(), -0.2), 'Rescue RSC-000044 confirmed', `${abcUnits[4]?.chassisNo ?? ''} · Delbros confirmed the rescue; the dispatcher is assigning the crew.`, '/client/rescue?open=RSC-000044', false),
+      note('N-CL-11', addHours(now(), -0.55), `Rescue RSC-000042 dispatched — ETA ${formatDateTime(addHours(now(), 0.45))}`, `${rsc42Unit?.chassisNo ?? ''} · In-house crew · Service van NCR 4521 · driver Romeo Santos +63 917 555 0101.`, '/client/rescue?open=RSC-000042', false),
+      note('N-CL-10', addHours(ago(60), -1), 'Rescue RSC-000020 completed', `Brake drum and lining replaced on site · charge ${formatPhp(18048.8)} · acknowledged by Juan Dela Cruz.`, '/client/rescue?open=RSC-000020', true),
       note('N-CL-8', addHours(now(), -0.9), 'Rescue RSC-000041 received', `${rsc41} · urgent · the dispatcher will call your scene contact to confirm the crew and ETA.`, '/client/rescue?open=RSC-000041', false),
       note('N-CL-7', addHours(now(), -3), 'EWA EU-000781 created', 'MNL · Juan Dela Cruz · NAB 5678 · valid for 24 hours.', '/client/ewa?open=EU-000781', false),
       note('N-CL-6', addHours(now(), -10), 'E-wallet close to the minimum', `Balance ${formatPhp(11951.2)} — below ${formatPhp(12500)} (125% of the ${formatPhp(10000)} minimum). Top up to keep rescue and repair charges covered.`, '/client/ewallet', false),
       note('N-CL-5', ago(1), 'Payment reminder: INV-MNL-00001101', `${formatPhp(due1101?.total)} due ${formatDate(due1101?.dueDate)}.`, '/client/invoices?open=INV-MNL-00001101', false),
-      note('N-CL-4', ago(13), 'Invoice INV-MNL-00001102 sent', 'Weekly lease billing — copy sent to billing@example.ph.', '/client/invoices?open=INV-MNL-00001102', true),
+      note('N-CL-4', ago(k0 + 7), 'Invoice INV-MNL-00001102 sent', 'Weekly lease billing — copy sent to billing@example.ph.', '/client/invoices?open=INV-MNL-00001102', true),
       note('N-CL-3', ago(12), 'Debit memo DM-000039 posted', `Park & Fix ABC-CH-2210 — ${formatPhp(2800)}.`, '/client#charges', true),
       ...back.map((g, k) => note(`N-CL-R${k}`, g.actualEventAt, `Unit ${g.chassisNo} returned`, `Gate In ${g.gatePassNo} at ${branches.find((b) => b.code === g.branchCode)?.name ?? g.branchCode}${g.crossBranchCode ? ` (cross-branch, code ${g.crossBranchCode})` : ''}.`, '/client#returns', true)),
       note('N-CL-1', ago(60), `E-wallet deduction ${formatPhp(18048.8)}`, 'Rescue RSC-000020 (debit memo DM-000021) — balance ' + formatPhp(11951.2) + '.', '/client/ewallet', true),
@@ -580,7 +639,7 @@ export function buildSeed(): Db {
     ];
   })();
 
-  return {
+  return renumberGatePasses({
     version: 4,
     branches, equipmentTypes, users, clients,
     accreditations: [
@@ -595,6 +654,13 @@ export function buildSeed(): Db {
     contracts,
     cashBonds: [
       { id: 'CB-1', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', amount: 20000, dateReceived: ago(205).slice(0, 10), receiptRef: 'OR-MNL-00000301', status: 'Held', withdrawals: [] },
+      // Timeline 2 review: what happened to the bonds of ABC's ended contracts (they showed "—" with no explanation).
+      { id: 'CB-6', clientCode: 'C-00123', contractNo: 'QLP-2025-0019', amount: 15000, dateReceived: ago(422).slice(0, 10), receiptRef: 'OR-MNL-00000196', status: 'Refunded', paymentMethod: 'Bank transfer', receivedBy: 'TREAS',
+        withdrawals: [{ id: 'CBW-6', amount: 15000, reason: 'Contract expired; all units returned and nothing owed', refundable: 15000, workflowId: 'WF-CBW-6', status: 'Refunded', requestedAt: ago(238),
+          refund: { method: 'Bank transfer', date: ago(226).slice(0, 10), reference: 'RF-2026-0041', by: 'ACCTG' } }],
+        outcome: { kind: 'Refunded', at: ago(226), amount: 15000, reference: 'RF-2026-0041', note: 'Refunded in full by bank transfer after the contract expired — all units returned, nothing owed (BR-14).' } },
+      { id: 'CB-7', clientCode: 'C-00123', contractNo: 'SPL-2025-0007', amount: 10000, dateReceived: ago(562).slice(0, 10), receiptRef: 'OR-MNL-00000142', status: 'Applied', paymentMethod: 'Check', receivedBy: 'TREAS', withdrawals: [],
+        outcome: { kind: 'Applied', at: ago(199), amount: 10000, reference: 'INV-MNL-00000987', note: 'Applied in full to the final Spot List bill INV-MNL-00000987 at termination (BR-14: what is owed is deducted first); nothing left to refund.' } },
       { id: 'CB-5', clientCode: 'C-00262', contractNo: 'QLP-2026-0003', amount: 20000, dateReceived: ago(205).slice(0, 10), receiptRef: 'OR-MNL-00000300', status: 'Held', withdrawals: [], paymentMethod: 'Bank transfer', receivedBy: 'TREAS' },
       { id: 'CB-2', clientCode: 'C-00188', contractNo: 'SPL-2026-0012', amount: 20000, dateReceived: ago(190).slice(0, 10), receiptRef: 'OR-MNL-00000318', status: 'Held', withdrawals: [] },
       { id: 'CB-3', clientCode: 'C-00201', contractNo: 'LTL-2026-0051', amount: 20000, dateReceived: ago(180).slice(0, 10), receiptRef: 'OR-CEB-00000044', status: 'Withdrawal Pending',
@@ -626,13 +692,15 @@ export function buildSeed(): Db {
         expectedPickupAt: addHours(now(), 2), remarks: 'Driver arrives after lunch; please stage the unit near Gate 2.',
         delivery: ([['Client', 'Maria Santos', 'client@abclogistics.ph'], ['Client', 'ABC Logistics Inc. (company email)', 'accounts@example.ph'], ['Delbros', 'Rocky Santos — Branch Generalist, MNL', 'bg.mnl@demo.delbros.local'], ['Delbros', 'Jasmine Reyes — Account Executive', 'ae.jreyes@demo.delbros.local']] as const)
           .map(([audience, recipient, to]) => ({ at: addHours(now(), -3), channel: 'Email' as const, audience, recipient, to, status: 'Sent' as const })) },
-      // Expired portal EWA so the client portal shows the "Request extension" path (portal review, DBL-GAT-003).
+      // Timeline 2 review: EU-000770 expired before the driver arrived; the client asked for an extension, the manager approved it, and it now waits for
+      // IT revalidation — a live "Extension requested" record (GAT-003, BR-06). Its unit still counts against the contract while the extension is pending.
       { euNo: 'EU-000770', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'MNL', driverName: 'Mario Reyes', driverLicenseNo: 'N02-15-334455', truckPlateNo: 'NAB 5679', trucker: 'XYZ Trucking',
-        units: [{ equipmentType: 'EQ2', qty: 1, usedChassis: [] }], createdAt: addHours(now(), -40), validUntil: addHours(now(), -16), createdVia: 'Portal', status: 'Expired', extensionCount: 0, createdBy: 'client@abclogistics.ph' },
-      // Review 1.1: the cancelled EWA in the Audit log is EU-000765 (not EU-000770, which simply expired) — shown with the Cancelled status in the portal.
+        units: [{ equipmentType: 'EQ2', qty: 1, usedChassis: [] }], createdAt: addHours(now(), -40), validUntil: addHours(now(), -16), createdVia: 'Portal', status: 'Extension Pending', extensionCount: 0, createdBy: 'client@abclogistics.ph',
+        extensions: [{ requestedAt: addHours(now(), -14), requestedBy: 'client@abclogistics.ph', reason: 'Driver held at the port by a customs inspection; arriving tomorrow morning', workflowId: 'WF-EWX-3', status: 'Pending', validUntilBefore: addHours(now(), -16) }] },
+      // Review 1.1 / Timeline 2: EU-000765 is a Cavite EWA — created by the client, cancelled two hours later by the Cavite branch (BG.CAV) at the client's call.
       { euNo: 'EU-000765', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'CAV', driverName: 'Ramil Santos', driverLicenseNo: 'N04-18-998877', truckPlateNo: 'NAB 5612', trucker: 'XYZ Trucking',
         units: [{ equipmentType: 'EQ1', qty: 1, usedChassis: [] }], createdAt: addHours(now(), -60), validUntil: addHours(now(), -36), createdVia: 'Portal', status: 'Cancelled', extensionCount: 0, createdBy: 'client@abclogistics.ph',
-        cancelledAt: addHours(now(), -58), cancelledBy: 'BG.MNL', cancelReason: 'Client cancelled the pickup — trucker unavailable' },
+        cancelledAt: addHours(now(), -58), cancelledBy: 'BG.CAV', cancelReason: 'Client cancelled the pickup — trucker unavailable' },
       { euNo: 'EU-000779', clientCode: 'C-00230', contractNo: 'LTL-2026-0060', branchCode: 'MNL', driverName: 'Pedro Penduko', driverLicenseNo: 'N02-11-000111', truckPlateNo: 'NCR 1122', trucker: 'Metro Haul',
         units: [{ equipmentType: 'EQ2', qty: 2, usedChassis: [] }], createdAt: addHours(now(), -30), validUntil: addHours(now(), -6), createdVia: 'Internal', status: 'Expired', extensionCount: 0, createdBy: 'AE.JREYES' },
       { euNo: 'EU-000776', clientCode: 'C-00201', contractNo: 'LTL-2026-0051', branchCode: 'CEB', driverName: 'Ramon Cruz', driverLicenseNo: 'G03-19-224466', truckPlateNo: 'GAB 3301', trucker: 'Visayas Trucking',
@@ -655,7 +723,18 @@ export function buildSeed(): Db {
         urgent: false, status: 'Dispatched' as const, requestedAt: addHours(now(), -0.9), requestedVia: 'Portal' as const, branchCode: rsc42Unit.branchCode, chargeable: true, problemType: 'Electrical / lights', loadStatus: 'Loaded' as const,
         verifiedBy: 'CNC.OFF1', confirmedBy: 'AE.JREYES', crew: 'In-house crew', rescueVehicle: 'Service van NCR 4521', driverName: 'Romeo Santos', driverPhone: '+63 917 555 0101', dispatchedAt: addHours(now(), -0.55), eta: addHours(now(), 0.45),
         statusLog: [{ status: 'Requested', at: addHours(now(), -0.9), by: 'client@abclogistics.ph' }, { status: 'Verified', at: addHours(now(), -0.8), by: 'CNC.OFF1' }, { status: 'Confirmed', at: addHours(now(), -0.7), by: 'AE.JREYES' }, { status: 'Dispatched', at: addHours(now(), -0.55), by: 'OPSMGR' }],
-        notified: rescueNotes(addHours(now(), -0.9), false, rsc42Unit.branchCode) }] : []),
+        notified: rescueNotes(addHours(now(), -0.9), false, rsc42Unit.branchCode),
+        clientNotices: [...clientNotice(addHours(now(), -0.7), 'Confirmed', 'Rescue RSC-000042 confirmed'), ...clientNotice(addHours(now(), -0.55), 'Dispatched', `Rescue RSC-000042 dispatched — ETA ${formatDateTime(addHours(now(), 0.45))}`)] }] : []),
+      // Timeline 2 review: safe test records so the client sees the two intermediate states in the list — Verified (C&C checked eligibility) and Confirmed.
+      ...(abcUnits[3] ? [{ rescueNo: 'RSC-000043', clientCode: 'C-00123', chassisNo: abcUnits[3].chassisNo, locationText: 'SCTEX northbound km 98, near Clark exit', incident: 'Air leak on the rear brake line', sceneContactName: 'Arnel Bautista', sceneContactPhone: '+63 917 333 2020',
+        urgent: false, status: 'Verified' as const, requestedAt: addHours(now(), -0.6), requestedVia: 'Portal' as const, branchCode: abcUnits[3].branchCode, chargeable: true, problemType: 'Brake problem', loadStatus: 'Empty' as const, verifiedBy: 'CNC.OFF1',
+        statusLog: [{ status: 'Requested', at: addHours(now(), -0.6), by: 'client@abclogistics.ph' }, { status: 'Verified', at: addHours(now(), -0.45), by: 'CNC.OFF1' }],
+        notified: rescueNotes(addHours(now(), -0.6), false, abcUnits[3].branchCode) }] : []),
+      ...(abcUnits[4] ? [{ rescueNo: 'RSC-000044', clientCode: 'C-00123', chassisNo: abcUnits[4].chassisNo, locationText: 'Butuan–Cagayan de Oro road km 12, Opol', incident: 'Rear left tire blown, unit loaded', sceneContactName: 'Juan Dela Cruz', sceneContactPhone: '+63 917 222 3344',
+        urgent: true, status: 'Confirmed' as const, requestedAt: addHours(now(), -0.4), requestedVia: 'Portal' as const, branchCode: abcUnits[4].branchCode, chargeable: true, problemType: 'Flat / blown tire', loadStatus: 'Loaded' as const, verifiedBy: 'CNC.OFF1', confirmedBy: 'AE.JREYES',
+        urgentAckBy: 'OPSMGR', urgentAckAt: addHours(now(), -0.35),
+        statusLog: [{ status: 'Requested', at: addHours(now(), -0.4), by: 'client@abclogistics.ph' }, { status: 'Verified', at: addHours(now(), -0.3), by: 'CNC.OFF1' }, { status: 'Confirmed', at: addHours(now(), -0.2), by: 'AE.JREYES' }],
+        notified: rescueNotes(addHours(now(), -0.4), true, abcUnits[4].branchCode), clientNotices: clientNotice(addHours(now(), -0.2), 'Confirmed', 'Rescue RSC-000044 confirmed') }] : []),
       { rescueNo: 'RSC-000041', clientCode: 'C-00123', chassisNo: onHire[0]?.chassisNo ?? '', locationText: 'SLEX northbound km 32, near Sta. Rosa exit', incident: 'Blown tire, rear axle', sceneContactName: 'Juan Dela Cruz', sceneContactPhone: '+63 917 222 3344',
         urgent: true, status: 'Requested', requestedAt: addHours(now(), -1), requestedVia: 'Portal', branchCode: 'MNL', chargeable: true,
         problemType: 'Flat / blown tire', loadStatus: 'Loaded', photos: ['rsc41-blown-tire.jpg', 'rsc41-location.jpg'], notified: rescueNotes(addHours(now(), -1), true) }, // review 1.1: load status was blank
@@ -668,7 +747,13 @@ export function buildSeed(): Db {
         dispatchedAt: addHours(ago(60), -4.5), eta: addHours(ago(60), -3.5), completedAt: addHours(ago(60), -1),
         chargeable: true, oneWayKm: 20, ratePerKm: 50, tireCost: 0, partsCost: 12650, total: 18048.8, debitMemoNo: 'DM-000021', loadStatus: 'Empty', photos: ['rsc20-brake.jpg'],
         costLines: [{ kind: 'Part', partCode: 'BRK-DRUM', description: 'Brake drum', qty: 1, unitPrice: 8280 }, { kind: 'Part', partCode: 'BRK-PAD', description: 'Brake lining set', qty: 1, unitPrice: 4370 }],
-        onsiteAssessment: 'Cracked rear brake drum; drum and lining replaced on site.', beforePhotos: ['rsc20-before.jpg'], afterPhotos: ['rsc20-after.jpg'], clientAckName: 'Juan Dela Cruz', acknowledgedAt: addHours(ago(60), -1), ewalletBalanceAfter: 11951.2 },
+        // Timeline 2 review (DBL-RES-006): the before / after pair and the client's acknowledgment, shown to the client with the dispatch details.
+        onsiteAssessment: 'Cracked rear brake drum; drum and lining replaced on site.', beforePhotos: ['rsc20-before-brake-drum.jpg', 'rsc20-before-axle.jpg'], afterPhotos: ['rsc20-after-new-drum.jpg', 'rsc20-after-road-test.jpg'],
+        clientAckName: 'Juan Dela Cruz', acknowledgedAt: addHours(ago(60), -1), ewalletBalanceAfter: 11951.2,
+        statusLog: [{ status: 'Requested', at: addHours(ago(60), -5), by: 'client@abclogistics.ph' }, { status: 'Verified', at: addHours(ago(60), -4.9), by: 'CNC.OFF1' }, { status: 'Confirmed', at: addHours(ago(60), -4.7), by: 'AE.JREYES' },
+          { status: 'Dispatched', at: addHours(ago(60), -4.5), by: 'OPSMGR' }, { status: 'In Progress', at: addHours(ago(60), -3.4), by: 'OPSMGR' }, { status: 'Completed', at: addHours(ago(60), -1), by: 'OPSMGR' }],
+        clientNotices: [...clientNotice(addHours(ago(60), -4.7), 'Confirmed', 'Rescue RSC-000020 confirmed'), ...clientNotice(addHours(ago(60), -4.5), 'Dispatched', `Rescue RSC-000020 dispatched — ETA ${formatDateTime(addHours(ago(60), -3.5))}`),
+          ...clientNotice(addHours(ago(60), -1), 'Completed', 'Rescue RSC-000020 completed')] },
       { rescueNo: 'RSC-000038', clientCode: 'C-00230', chassisNo: onHire[3]?.chassisNo ?? '', locationText: 'C5 Road, Taguig', incident: 'Brake lock', sceneContactName: 'Pedro Penduko', sceneContactPhone: '+63 917 111 2233',
         urgent: false, status: 'Completed', requestedAt: ago(6), requestedVia: 'Internal', branchCode: 'MNL', crew: 'Roadside Rescue Partners', dispatchedAt: addHours(ago(6), 0.5), completedAt: addHours(ago(6), 3.25),
         // BR-11: travel 18 km × 2 × ₱50 = 1,800 + parts 4,370 (BRK-PAD rescue price) = 6,170 + 10% = 6,787 + 12% VAT = 7,601.44
@@ -679,8 +764,10 @@ export function buildSeed(): Db {
       { rescueNo: 'RSC-000040', clientCode: 'C-00123', chassisNo: onHire[5]?.chassisNo ?? '', locationText: 'NLEX southbound km 21, Valenzuela', incident: 'Flat tire, front axle', sceneContactName: 'Mark Villanueva', sceneContactPhone: '+63 917 333 4455',
         // Portal Rescue review: problem type recorded (it was blank on this cancelled request).
         problemType: 'Flat / blown tire',
+        // Timeline 2 review: cancelled by the client while still Requested (the dispatcher had only acknowledged the urgent SMS); the Audit log matches.
         urgent: true, status: 'Cancelled', requestedAt: ago(2), requestedVia: 'Portal', branchCode: onHire[5]?.branchCode ?? 'MNL', chargeable: true, loadStatus: 'Empty', urgentAckBy: 'OPSMGR', urgentAckAt: addHours(ago(2), 0.2),
-        cancelReason: 'Client driver fixed the tire on site; rescue no longer needed.', cancelledBy: 'OPSMGR', cancelledAt: addHours(ago(2), 0.75) },
+        cancelReason: 'Client driver fixed the tire on site; rescue no longer needed.', cancelledBy: 'client@abclogistics.ph', cancelledAt: addHours(ago(2), 0.75),
+        statusLog: [{ status: 'Requested', at: ago(2), by: 'client@abclogistics.ph' }, { status: 'Cancelled', at: addHours(ago(2), 0.75), by: 'client@abclogistics.ph' }] },
       // Hold client blocked at intake (BR-01): logged for audit, never reaches C&C verification.
       { rescueNo: 'RSC-000037', clientCode: 'C-00188', chassisNo: onHire[1]?.chassisNo ?? '', locationText: 'Marcos Highway, Antipolo', incident: 'Air leak, brakes locked', sceneContactName: 'Leo Navarro', sceneContactPhone: '+63 917 777 8899',
         urgent: false, status: 'Blocked', blockedReason: 'Pacific Movers Corp. is ON HOLD for overdue balance. Chassis release, gate pass, repair scheduling and new services are blocked (BR-01).', blockedAt: addHours(now(), -5), requestedAt: addHours(now(), -5), requestedVia: 'Internal', branchCode: onHire[1]?.branchCode ?? 'MNL', chargeable: true, loadStatus: 'Loaded', problemType: 'Brake problem' }, // phoned in; the portal refuses requests while on hold
@@ -711,21 +798,21 @@ export function buildSeed(): Db {
         actions: [{ at: ago(7), action: 'SOA Sent', by: 'CNC.OFF1', notes: 'SOA-2026-00310 by courier' }] },
     ],
     ewallets: [
-      { clientCode: 'C-00123', balance: 11951.2, minimumBalance: 10000, createdAt: ago(200), createdBy: 'ACCTG', receiptNo: 'OR-MNL-00000290', clearedDate: ago(200).slice(0, 10), paymentMethod: 'Bank transfer', bankRef: 'BDO 003311', treasuryRef: 'TRS-2026-0112', treasuryConfirmedBy: 'TREAS', treasuryConfirmedAt: ago(200) },
+      { clientCode: 'C-00123', balance: 11951.2, minimumBalance: 10000, createdAt: ago(200), createdBy: 'ACCTG', receiptNo: 'OR-MNL-00000302', clearedDate: ago(200).slice(0, 10), paymentMethod: 'Bank transfer', bankRef: 'BDO 003311', treasuryRef: 'TRS-2026-0112', treasuryConfirmedBy: 'TREAS', treasuryConfirmedAt: ago(200) },
       { clientCode: 'C-00188', balance: -2500, minimumBalance: 10000, createdAt: ago(190) },
       { clientCode: 'C-00201', balance: 45000, minimumBalance: 10000, createdAt: ago(170) },
       { clientCode: 'C-00230', balance: 9398.56, minimumBalance: 10000, createdAt: ago(150) },
       { clientCode: 'C-00262', balance: 2350, minimumBalance: 10000, createdAt: ago(200) },
     ],
     ewalletTxns: [
-      { id: 'EWT-1', clientCode: 'C-00123', at: ago(200), type: 'Replenishment', amount: 30000, balanceAfter: 30000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000290', receiptNo: 'OR-MNL-00000290', treasuryRef: 'TRS-2026-0112', category: 'Top-up', reason: 'Initial funding (Treasury confirmed)', by: 'ACCTG' },
+      { id: 'EWT-1', clientCode: 'C-00123', at: ago(200), type: 'Replenishment', amount: 30000, balanceAfter: 30000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000302', receiptNo: 'OR-MNL-00000302', treasuryRef: 'TRS-2026-0112', category: 'Top-up', reason: 'Initial funding (Treasury confirmed)', by: 'ACCTG' },
       { id: 'EWT-2', clientCode: 'C-00123', at: ago(60), type: 'Deduction', amount: -18048.8, balanceAfter: 11951.2, referenceType: 'Rescue', referenceId: 'RSC-000020', category: 'Rescue', by: 'system' },
       // Portal E-wallet review: DM-000039 was first deducted, then reversed at the client's request — it will be billed on an invoice instead.
       { id: 'EWT-10', clientCode: 'C-00123', at: ago(11.5), type: 'Deduction', amount: -2800, balanceAfter: 9151.2, referenceType: 'Debit Memo', referenceId: 'DM-000039', category: 'Debit Memo', by: 'ACCTG', reversedById: 'EWT-11' },
       { id: 'EWT-11', clientCode: 'C-00123', at: ago(11), type: 'Reversal', amount: 2800, balanceAfter: 11951.2, referenceType: 'Reversal', referenceId: 'EWT-10', reversesId: 'EWT-10', category: 'Reversal', reason: 'Client asked to settle DM-000039 on its next invoice instead — deduction reversed', by: 'ACCTG' },
-      { id: 'EWT-12', clientCode: 'C-00262', at: ago(200), type: 'Replenishment', amount: 10000, balanceAfter: 10000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000299', receiptNo: 'OR-MNL-00000299', category: 'Top-up', reason: 'Initial funding (Treasury confirmed)', by: 'ACCTG' },
+      { id: 'EWT-12', clientCode: 'C-00262', at: ago(200), type: 'Replenishment', amount: 10000, balanceAfter: 10000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000303', receiptNo: 'OR-MNL-00000303', category: 'Top-up', reason: 'Initial funding (Treasury confirmed)', by: 'ACCTG' },
       { id: 'EWT-13', clientCode: 'C-00262', at: ago(90), type: 'Deduction', amount: -7650, balanceAfter: 2350, referenceType: 'Repair', referenceId: 'JO-NVL-000077', category: 'Repair', reason: 'Chargeable tire replacement', by: 'system' },
-      { id: 'EWT-3', clientCode: 'C-00230', at: ago(150), type: 'Replenishment', amount: 17000, balanceAfter: 17000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000305', receiptNo: 'OR-MNL-00000305', treasuryRef: 'TRS-2026-0140', category: 'Top-up', by: 'ACCTG' },
+      { id: 'EWT-3', clientCode: 'C-00230', at: ago(150), type: 'Replenishment', amount: 17000, balanceAfter: 17000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000319', receiptNo: 'OR-MNL-00000319', treasuryRef: 'TRS-2026-0140', category: 'Top-up', by: 'ACCTG' },
       { id: 'EWT-4', clientCode: 'C-00230', at: ago(6), type: 'Deduction', amount: -7601.44, balanceAfter: 9398.56, referenceType: 'Debit Memo', referenceId: 'DM-000040', category: 'Rescue', by: 'system' },
       { id: 'EWT-5', clientCode: 'C-00188', at: ago(190), type: 'Replenishment', amount: 10000, balanceAfter: 10000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000317', receiptNo: 'OR-MNL-00000317', treasuryRef: 'TRS-2026-0128', category: 'Top-up', by: 'ACCTG' },
       { id: 'EWT-6', clientCode: 'C-00188', at: ago(40), type: 'Deduction', amount: -12500, balanceAfter: -2500, referenceType: 'Rescue', referenceId: 'RSC-000029', category: 'Rescue', by: 'system' },
@@ -752,8 +839,15 @@ export function buildSeed(): Db {
     notificationRules,
     notifications: [...clientNotifications, ...adminNotifications],
     audit: [
-      { id: 'A-EWA-765', at: addHours(now(), -58), actor: 'BG.MNL', action: 'ewa.cancelled', entityType: 'ewa', entityId: 'EU-000765', branchCode: 'CAV', before: { status: 'Active' }, after: { status: 'Cancelled' }, reason: 'Client cancelled the pickup — trucker unavailable', source: 'Staff app' },
+      // Timeline 2 review: the Audit log matches the EWA records — created first, cancelled two hours later by the Cavite branch user.
+      { id: 'A-EWA-765C', at: addHours(now(), -60), actor: 'client@abclogistics.ph', actorRole: 'CLIENT', action: 'ewa.created', entityType: 'ewa', entityId: 'EU-000765', branchCode: 'CAV', after: { status: 'Active', validUntil: addHours(now(), -36) }, source: 'Portal' },
+      { id: 'A-EWA-765', at: addHours(now(), -58), actor: 'BG.CAV', actorRole: 'BRANCH_GENERALIST', action: 'ewa.cancelled', entityType: 'ewa', entityId: 'EU-000765', branchCode: 'CAV', before: { status: 'Active' }, after: { status: 'Cancelled' }, reason: 'Client cancelled the pickup — trucker unavailable', source: 'Web (internal) · Android tablet (gate)' },
       { id: 'A-EWA-770', at: addHours(now(), -16), actor: 'system', action: 'ewa.expired', entityType: 'ewa', entityId: 'EU-000770', branchCode: 'MNL', before: { status: 'Active' }, after: { status: 'Expired', lapsedUnits: 1 }, reason: 'Validity ended (BR-06)', source: 'System' },
+      { id: 'A-EWA-770X', at: addHours(now(), -14), actor: 'client@abclogistics.ph', actorRole: 'CLIENT', action: 'ewa.extension_requested', entityType: 'ewa', entityId: 'EU-000770', branchCode: 'MNL', after: { status: 'Extension Pending', workflowId: 'WF-EWX-3' }, reason: 'Driver held at the port by a customs inspection; arriving tomorrow morning', source: 'Portal' },
+      { id: 'A-EWA-770M', at: addHours(now(), -12), actor: 'DYM.MNL', actorRole: 'DYM', action: 'workflow.approved', entityType: 'ewa', entityId: 'EU-000770', branchCode: 'MNL', after: { workflow: 'WF-EWX-3', step: 'Manager approval', next: 'IT / authorised revalidation' }, reason: 'Customs hold confirmed with the port', source: 'Web (internal)' },
+      // Timeline 2 review: RSC-000040 — requested first, cancelled by the client 45 minutes later while still Requested (allowed before C&C verification).
+      { id: 'A-RSC-040R', at: ago(2), actor: 'client@abclogistics.ph', actorRole: 'CLIENT', action: 'rescue.requested', entityType: 'rescue', entityId: 'RSC-000040', after: { status: 'Requested', urgent: true }, source: 'Portal' },
+      { id: 'A-RSC-040C', at: addHours(ago(2), 0.75), actor: 'client@abclogistics.ph', actorRole: 'CLIENT', action: 'rescue.cancel', entityType: 'rescue', entityId: 'RSC-000040', before: { status: 'Requested' }, after: { status: 'Cancelled' }, reason: 'Client driver fixed the tire on site; rescue no longer needed.', source: 'Portal' },
       { id: 'A-1', at: ago(15), actor: 'system', action: 'client.hold.applied', entityType: 'client', entityId: 'C-00188', after: { status: 'Hold' }, reason: 'Invoice INV-MNL-00001050 unpaid 31 days past due (BR-02)' }],
     settings: DEFAULT_SETTINGS.map((s) => ({ ...s })),
     // Park & Fix stores CLIENT-OWNED trailers (not in the Delbros fleet, so never in Available / DCIR fleet totals).
@@ -777,6 +871,30 @@ export function buildSeed(): Db {
       { id: 'CRQ-000001', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', kind: 'Amendment', changeArea: 'Branches covered', details: 'Add Batangas, Clark and Cagayan de Oro — our trucks now pick up from these depots.',
         status: 'Approved', submittedAt: ago(160), submittedBy: 'client@abclogistics.ph', decidedAt: ago(155), decidedBy: 'AE.JREYES', decisionNote: 'Branches added to the account (CWS access); rates unchanged.' },
     ],
-    seq: { EU: 781, GP: 2000, EIR: 500, JO: 520, RSC: 42, TU: 3, CRQ: 1, INV: 1200, OR: 460, CM: 10, DM: 40, PR: 210, PO: 155, RR: 60, RFP: 30, PCV: 88, CT: 70, CL: 260, WF: 10, LE: 1, SOA: 318, STK: 120,EWT: 10, HL: 1 },
-  };
+    seq: { EU: 781, GP: 2000, EIR: 500, JO: 520, RSC: 44, TU: 3, CRQ: 1, INV: 1200, OR: 460, CM: 10, DM: 40, PR: 210, PO: 155, RR: 60, RFP: 30, PCV: 88, CT: 70, CL: 262, WF: 10, LE: 1, SOA: 318, STK: 120,EWT: 10, HL: 1 },
+  });
+}
+
+/**
+ * Timeline 2 review ("Gate Pass format and order"): one FRS format (branch prefix + 4 digits) and, within each branch, numbers that follow the
+ * date of the movement — the seed used to number releases by list position, so a later Gate In could carry a lower number (MNL0884 on 29-Sep,
+ * MNL0881 on 08-Oct). Each branch keeps its lowest number as the start; every reference (pairs, EIRs, EWAs, remarks, invoices, notifications,
+ * late encodings, workflows) is rewritten in the same pass.
+ */
+function renumberGatePasses(d: Db): Db {
+  const map = new Map<string, string>();
+  const byBranch = new Map<string, Db['gatePasses']>();
+  for (const g of d.gatePasses) { if (!byBranch.has(g.branchCode)) byBranch.set(g.branchCode, []); byBranch.get(g.branchCode)!.push(g); }
+  for (const [code, list] of byBranch) {
+    const prefix = d.branches.find((b) => b.code === code)?.gatePassPrefix || code;
+    const re = new RegExp(`^${prefix}([0-9]{4})$`);
+    const nums = list.map((g) => Number(re.exec(g.gatePassNo)?.[1])).filter(Number.isFinite);
+    if (!nums.length) continue;
+    const base = Math.min(...nums);
+    [...list].sort((a, b) => a.actualEventAt.localeCompare(b.actualEventAt) || a.gatePassNo.localeCompare(b.gatePassNo))
+      .forEach((g, k) => map.set(g.gatePassNo, `${prefix}${String(base + k).padStart(4, '0')}`));
+  }
+  const prefixes = [...new Set(d.branches.map((b) => b.gatePassPrefix || b.code))].join('|');
+  const token = new RegExp(`(?<![A-Za-z0-9-])(?:${prefixes})[0-9]{4}(?![0-9])`, 'g');
+  return JSON.parse(JSON.stringify(d).replace(token, (m) => map.get(m) ?? m)) as Db;
 }

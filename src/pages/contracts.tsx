@@ -50,7 +50,11 @@ export function ClientContractsPage() {
                     className={cn("cursor-pointer border-b border-line last:border-0 hover:bg-brand-50", current?.contractNo === c.contractNo && "bg-brand-50")}>
                     <td className="py-2 pr-3 font-mono font-medium text-brand-700">{c.contractNo}</td>
                     <td className="pr-3">{CONTRACT_TYPES[c.contractType]?.name ?? c.contractType}</td>
-                    <td className="pr-3 whitespace-nowrap">{formatDate(c.effectiveDate)} – {c.status === "Terminated" && c.termination?.effectiveDate ? formatDate(c.termination.effectiveDate) : c.expiryDate ? formatDate(c.expiryDate) : "open-ended"}</td>
+                    {/* Timeline 2 review: a terminated contract shows its termination date as such — Spot List has no expiry (BR-12). */}
+                    <td className="pr-3 whitespace-nowrap">
+                      {formatDate(c.effectiveDate)} – {c.status === "Terminated" && c.termination?.effectiveDate ? <>terminated {formatDate(c.termination.effectiveDate)}</> : c.expiryDate ? formatDate(c.expiryDate) : "no expiry"}
+                      {c.status === "Terminated" && !c.expiryDate && <span className="block text-xs text-muted">no contractual expiry</span>}
+                    </td>
                     <td className="pr-3"><PortalStatus domain="contract" value={c.status} /></td>
                     <td className="pr-3 text-right tabular">{c.unitQty}</td>
                     <td className="pr-3 text-right tabular">{c.onHireUnits.length}</td>
@@ -90,7 +94,7 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
     <Card>
       <CardHeader
         title={<span className="font-mono">{c.contractNo}</span>}
-        description={`${CONTRACT_TYPES[c.contractType]?.name ?? c.contractType} (${c.contractType}, class ${c.class}) · ${formatDate(c.effectiveDate)} – ${c.expiryDate ? formatDate(c.expiryDate) : "open-ended"} · version ${c.version ?? 1}`}
+        description={`${CONTRACT_TYPES[c.contractType]?.name ?? c.contractType} (${c.contractType}, class ${c.class}) · ${formatDate(c.effectiveDate)} – ${c.expiryDate ? formatDate(c.expiryDate) : c.status === "Terminated" && c.termination ? `terminated ${formatDate(c.termination.effectiveDate)} (no contractual expiry)` : "no expiry"} · version ${c.version ?? 1}`}
         actions={
           <span className="flex flex-col items-end gap-1">
             <PortalStatus domain="contract" value={c.status} />
@@ -102,6 +106,27 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
         <Banner tone="info" className="mb-4" title={`Terminated ${formatDate(c.termination.effectiveDate)}`}>{c.termination.reason}</Banner>
       )}
       {c.status === "Expired" && <Banner tone="info" className="mb-4" title={`Expired ${formatDate(c.expiryDate)}`}>The contract reached its end date. Units still out under it are billed until returned.</Banner>}
+      {/* Timeline 2 review: renewal state and what happened to the cash bond, on every contract (inactive ones especially). */}
+      {(c.renewal || (c.status !== "Active" && c.bonds.length > 0)) && (
+        <dl className="mb-4 grid gap-x-6 gap-y-3 rounded-lg border border-line bg-surface-alt/50 p-3 text-sm sm:grid-cols-2">
+          {c.renewal && (
+            <Term label="Renewal">
+              {c.renewal.state}{c.renewal.date ? ` · ${formatDate(c.renewal.date)}` : ""}{c.renewal.successor ? ` → ${c.renewal.successor}` : ""}
+              {c.renewal.note && <span className="block text-xs font-normal text-muted">{c.renewal.note}</span>}
+            </Term>
+          )}
+          {c.status !== "Active" && (
+            <Term label="Cash bond">
+              {c.bonds.length ? c.bonds.map((b) => (
+                <span key={b.id} className="block">
+                  {formatPhp(b.amount)} received {formatDate(b.dateReceived)} ({b.receiptRef}) — {b.outcome ? `${b.outcome.kind.toLowerCase()} ${formatDate(b.outcome.at)}, ref ${b.outcome.reference}` : b.status.toLowerCase()}
+                  {b.outcome && <span className="block text-xs font-normal text-muted">{b.outcome.note}</span>}
+                </span>
+              )) : "No cash bond on this contract"}
+            </Term>
+          )}
+        </dl>
+      )}
 
       {/* Terms, with the lock-in end, BR-15 fee, minimum billing days and renewal notices. */}
       <dl className="mb-5 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
@@ -128,6 +153,11 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
         <Term label="Late payment interest">{c.penalties.lateInterestPct}% per month</Term>
         <Term label="Non-return penalty">{formatPhp(c.penalties.nonReturn)} per unit</Term>
         <Term label="Dishonored check">{formatPhp(c.penalties.dishonoredCheck)}</Term>
+        {/* Timeline 2 review: the fourth penalty in the Screen Inventory, and the DBL-CLT-008 fields (internal-only scope to be confirmed). */}
+        <Term label="Deferred check">{formatPhp(c.penalties.deferredCheck)}<span className="block text-xs font-normal text-muted">contract value · rule pending approval</span></Term>
+        <Term label="Payment method">{c.paymentMethod}</Term>
+        <Term label="Client signatory">{c.signatory ? <>{c.signatory.name}<span className="block text-xs font-normal text-muted">{c.signatory.email}</span></> : "—"}</Term>
+        <Term label="Region">{c.regionName}</Term>
         <Term label="Units contracted">{c.unitQty}</Term>
         <Term label="Signed">{signed ? formatDate(signed) : "—"}</Term>
         <Term label="Notarized">{notarized ? formatDate(notarized) : "—"}</Term>
@@ -141,6 +171,7 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
           <thead>
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="py-2 pr-3">Equipment type</th><th className="pr-3 text-right">Daily rate</th><th className="pr-3 text-right">Rate card</th>
+              <th className="pr-3 text-right" title="Indemnity / loss value per unit — charged if a unit is lost or force-inbounded (BR-17)">Indemnity / loss</th>
               <th className="pr-3 text-right">Entitled</th><th className="pr-3 text-right">On hire</th>{c.status === "Active" && <><th className="pr-3 text-right">On open EWAs</th><th className="text-right">Can still request</th></>}
             </tr>
           </thead>
@@ -150,6 +181,7 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
                 <td className="py-1.5 pr-3">{eqName(e.equipmentType)}</td>
                 <td className="pr-3 text-right tabular">{formatPhp(e.dailyRate)}</td>
                 <td className="pr-3 text-right tabular text-muted">{e.rateCard != null ? (e.rateCard === e.dailyRate ? "same" : formatPhp(e.rateCard)) : "—"}</td>
+                <td className="pr-3 text-right tabular">{formatPhp(e.indemnity)}</td>
                 <td className="pr-3 text-right">{e.entitled == null ? <span className="text-xs">within the contract total</span> : e.entitled === 0 ? <span className="text-xs">Not entitled — on request</span> : <span className="tabular">{e.entitled}</span>}</td>
                 <td className={cn("pr-3 text-right tabular", e.onHire > (e.entitled ?? Infinity) && "font-medium text-danger")}>{e.onHire || "—"}</td>
                 {c.status === "Active" && <><td className="pr-3 text-right tabular">{e.pending || "—"}</td><td className="text-right tabular">{e.entitled === 0 ? "—" : e.remaining ?? "—"}</td></>}
@@ -158,7 +190,7 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
           </tbody>
           {c.entitlementTotals && (
             <tfoot>
-              <tr className="font-medium"><td className="pt-2" colSpan={3}>Total</td><td className="pt-2 pr-3 text-right tabular">{c.entitlement.reduce((a, e) => a + (e.entitled ?? 0), 0) || c.unitQty} of {c.unitQty}</td>
+              <tr className="font-medium"><td className="pt-2" colSpan={4}>Total</td><td className="pt-2 pr-3 text-right tabular">{c.entitlement.reduce((a, e) => a + (e.entitled ?? 0), 0) || c.unitQty} of {c.unitQty}</td>
                 <td className="pt-2 pr-3 text-right tabular">{c.entitlementTotals.onHire}</td><td className="pt-2 pr-3 text-right tabular">{c.entitlementTotals.pending}</td><td className="pt-2 text-right tabular">{c.entitlementTotals.remaining}</td></tr>
             </tfoot>
           )}
@@ -166,7 +198,8 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       </div>
       <p className="mb-5 text-xs text-muted">
         “Not entitled — on request”: the type is on the rate card but not in this contract’s allocation; ask your Account Executive to add it
-        (an amendment). Every unit on hire is of an entitled type. Where a rate differs in size order (for example the 20ft flatbed above the
+        (an amendment). Every unit on hire is of an entitled type. Indemnity / loss is the value charged per unit if it is lost or brought back by
+        Force Inbound (BR-17). Where a rate differs in size order (for example the 20ft flatbed above the
         45ft chassis), the contract follows the approved rate card — Delbros to confirm the card.
       </p>
 
@@ -196,7 +229,7 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       <h3 className="mb-1 text-sm font-semibold text-ink">Branches covered</h3>
       <p className="mb-2 text-sm text-ink-2">
         {c.branches.covered.map((b) => b.name).join(", ")}
-        <span className="block text-xs text-muted">The branches enabled for your account — the same list New EWA offers. Pickups and releases happen only at these branches.</span>
+        <span className="block text-xs text-muted">The branches enabled for your account — the same list New EWA offers. Pickups and releases happen only at these branches. Every covered branch is listed below, with zeros where there has been no activity yet.</span>
       </p>
       {!!c.branches.activity.length && (
         <div className="mb-2 overflow-x-auto">
