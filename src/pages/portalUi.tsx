@@ -96,7 +96,7 @@ export const MiniHead = ({
 }) => (
   <div
     className={cn(
-      "hidden gap-3 border-b border-line pb-2 text-xs font-medium uppercase tracking-wide text-muted sm:grid",
+      "hidden gap-3 border-b border-line pb-3 text-sm font-medium text-muted sm:grid",
       cols,
     )}
   >

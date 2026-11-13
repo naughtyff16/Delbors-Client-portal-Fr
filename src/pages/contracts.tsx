@@ -29,8 +29,8 @@ export function ClientContractsPage() {
     <>
       <PageHeader title="Contracts" description="Your lease contracts — terms, entitlement, daily rates and their history. Select a contract to see its details." />
       <Card className="mb-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-semibold text-ink">Your contracts ({list.data?.length ?? 0})</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold tracking-tight text-ink">Your contracts ({list.data?.length ?? 0})</h2>
           <div className="max-w-full overflow-x-auto">
             <Segmented value={filter} onChange={setFilter} options={FILTERS.map((f) => ({ value: f, label: `${f}${f === "All" ? "" : ` (${(list.data ?? []).filter((c) => c.status === f).length})`}` }))} />
           </div>
@@ -39,7 +39,7 @@ export function ClientContractsPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+                <tr className="border-b border-line text-left text-sm font-medium text-muted">
                   <th className="py-2 pr-3">Contract</th><th className="pr-3">Type</th><th className="pr-3">Term</th><th className="pr-3">Status</th>
                   <th className="pr-3 text-right">Units</th><th className="pr-3 text-right">On hire</th><th className="text-right">Cash bond</th>
                 </tr>
@@ -47,13 +47,13 @@ export function ClientContractsPage() {
               <tbody>
                 {rows.map((c) => (
                   <tr key={c.contractNo} onClick={() => setSel(c.contractNo)} aria-selected={current?.contractNo === c.contractNo}
-                    className={cn("cursor-pointer border-b border-line last:border-0 hover:bg-brand-50", current?.contractNo === c.contractNo && "bg-brand-50")}>
-                    <td className="py-2 pr-3 font-mono font-medium text-brand-700">{c.contractNo}</td>
+                    className={cn("cursor-pointer border-b border-line transition-colors duration-150 last:border-0 hover:bg-brand-50/60", current?.contractNo === c.contractNo && "bg-brand-50")}>
+                    <td className="py-3 pr-3 font-mono font-medium text-brand-700">{c.contractNo}</td>
                     <td className="pr-3">{CONTRACT_TYPES[c.contractType]?.name ?? c.contractType}</td>
                     {/* Timeline 2 review: a terminated contract shows its termination date as such — Spot List has no expiry (BR-12). */}
                     <td className="pr-3 whitespace-nowrap">
                       {formatDate(c.effectiveDate)} – {c.status === "Terminated" && c.termination?.effectiveDate ? <>terminated {formatDate(c.termination.effectiveDate)}</> : c.expiryDate ? formatDate(c.expiryDate) : "no expiry"}
-                      {c.status === "Terminated" && !c.expiryDate && <span className="block text-xs text-muted">no contractual expiry</span>}
+                      {c.status === "Terminated" && !c.expiryDate && <span className="block text-sm text-muted">no contractual expiry</span>}
                     </td>
                     <td className="pr-3"><PortalStatus domain="contract" value={c.status} /></td>
                     <td className="pr-3 text-right tabular">{c.unitQty}</td>
@@ -77,8 +77,8 @@ export function ClientContractsPage() {
 function Term({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs text-muted">{label}</dt>
-      <dd className="font-medium text-ink">{children}</dd>
+      <dt className="text-sm text-muted">{label}</dt>
+      <dd className="mt-0.5 font-medium text-ink">{children}</dd>
     </div>
   );
 }
@@ -96,9 +96,9 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
         title={<span className="font-mono">{c.contractNo}</span>}
         description={`${CONTRACT_TYPES[c.contractType]?.name ?? c.contractType} (${c.contractType}, class ${c.class}) · ${formatDate(c.effectiveDate)} – ${c.expiryDate ? formatDate(c.expiryDate) : c.status === "Terminated" && c.termination ? `terminated ${formatDate(c.termination.effectiveDate)} (no contractual expiry)` : "no expiry"} · version ${c.version ?? 1}`}
         actions={
-          <span className="flex flex-col items-end gap-1">
+          <span className="flex flex-col items-end gap-1.5">
             <PortalStatus domain="contract" value={c.status} />
-            {left != null && <span className={cn("text-xs", left <= 30 ? "font-medium text-warning" : "text-muted")}>{left < 0 ? "Past end date" : left === 0 ? "Ends today" : `Expires in ${plural(left, "day")}`}</span>}
+            {left != null && <span className={cn("text-sm", left <= 30 ? "font-medium text-warning" : "text-muted")}>{left < 0 ? "Past end date" : left === 0 ? "Ends today" : `Expires in ${plural(left, "day")}`}</span>}
           </span>
         }
       />
@@ -108,11 +108,11 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       {c.status === "Expired" && <Banner tone="info" className="mb-4" title={`Expired ${formatDate(c.expiryDate)}`}>The contract reached its end date. Units still out under it are billed until returned.</Banner>}
       {/* Timeline 2 review: renewal state and what happened to the cash bond, on every contract (inactive ones especially). */}
       {(c.renewal || (c.status !== "Active" && c.bonds.length > 0)) && (
-        <dl className="mb-4 grid gap-x-6 gap-y-3 rounded-lg border border-line bg-surface-alt/50 p-3 text-sm sm:grid-cols-2">
+        <dl className="mb-6 grid gap-x-6 gap-y-4 rounded-2xl bg-surface-alt p-4 text-sm sm:grid-cols-2">
           {c.renewal && (
             <Term label="Renewal">
               {c.renewal.state}{c.renewal.date ? ` · ${formatDate(c.renewal.date)}` : ""}{c.renewal.successor ? ` → ${c.renewal.successor}` : ""}
-              {c.renewal.note && <span className="block text-xs font-normal text-muted">{c.renewal.note}</span>}
+              {c.renewal.note && <span className="block text-sm font-normal text-muted">{c.renewal.note}</span>}
             </Term>
           )}
           {c.status !== "Active" && (
@@ -120,7 +120,7 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
               {c.bonds.length ? c.bonds.map((b) => (
                 <span key={b.id} className="block">
                   {formatPhp(b.amount)} received {formatDate(b.dateReceived)} ({b.receiptRef}) — {b.outcome ? `${b.outcome.kind.toLowerCase()} ${formatDate(b.outcome.at)}, ref ${b.outcome.reference}` : b.status.toLowerCase()}
-                  {b.outcome && <span className="block text-xs font-normal text-muted">{b.outcome.note}</span>}
+                  {b.outcome && <span className="block text-sm font-normal text-muted">{b.outcome.note}</span>}
                 </span>
               )) : "No cash bond on this contract"}
             </Term>
@@ -129,34 +129,34 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       )}
 
       {/* Terms, with the lock-in end, BR-15 fee, minimum billing days and renewal notices. */}
-      <dl className="mb-5 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
+      <dl className="mb-6 grid gap-x-6 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-4">
         <Term label="Billing cycle">{c.billingCycle}</Term>
         <Term label="Credit term">{c.creditTermDays} days from invoice date</Term>
         <Term label="Cash bond held">{formatPhp(c.bondHeld)}</Term>
         <Term label="E-wallet minimum">{c.ewalletMinimum != null ? formatPhp(c.ewalletMinimum) : "—"}</Term>
         <Term label="Lock-in period (BR-15)">
-          {c.lockInMonths ? <>{c.lockInMonths} months<span className="block text-xs font-normal text-muted">ends {formatDate(c.lockInEnd)}</span></> : "None"}
+          {c.lockInMonths ? <>{c.lockInMonths} months<span className="block text-sm font-normal text-muted">ends {formatDate(c.lockInEnd)}</span></> : "None"}
         </Term>
         <Term label="Pre-termination fee (BR-15)">
           {!c.lockInMonths ? "None — no lock-in" : c.status !== "Active" ? "—" : pt.inLockIn ? (
             <>{formatPhp(pt.fee)} if ended today
-              <span className="block text-xs font-normal text-muted">{pt.chargeableDays} of {pt.remainingDays} lock-in days left (max {pt.capDays}) × {formatPhp(pt.dailyTotal)}/day for {plural(pt.unitsOnHire, "unit")} on hire · proposed</span></>
-          ) : <>None<span className="block text-xs font-normal text-muted">lock-in ended {formatDate(c.lockInEnd)}</span></>}
+              <span className="block text-sm font-normal text-muted">{pt.chargeableDays} of {pt.remainingDays} lock-in days left (max {pt.capDays}) × {formatPhp(pt.dailyTotal)}/day for {plural(pt.unitsOnHire, "unit")} on hire · proposed</span></>
+          ) : <>None<span className="block text-sm font-normal text-muted">lock-in ended {formatDate(c.lockInEnd)}</span></>}
         </Term>
-        <Term label="Minimum billing">{plural(c.minBillingDays, "day")} per release<span className="block text-xs font-normal text-muted">pickup day counts · proposed</span></Term>
+        <Term label="Minimum billing">{plural(c.minBillingDays, "day")} per release<span className="block text-sm font-normal text-muted">pickup day counts · proposed</span></Term>
         <Term label="Renewal notices">
           {c.renewalNotices.length ? (
             <>{c.renewalNotices.map((n) => `${n.monthsBefore} mo ${formatDate(n.date)}${n.sent ? " ✓" : ""}`).join(" · ")}
-              <span className="block text-xs font-normal text-muted">{nextNotice ? `next on ${formatDate(nextNotice.date)}` : "all sent"} · DBL-CLT-011</span></>
+              <span className="block text-sm font-normal text-muted">{nextNotice ? `next on ${formatDate(nextNotice.date)}` : "all sent"} · DBL-CLT-011</span></>
           ) : "—"}
         </Term>
         <Term label="Late payment interest">{c.penalties.lateInterestPct}% per month</Term>
         <Term label="Non-return penalty">{formatPhp(c.penalties.nonReturn)} per unit</Term>
         <Term label="Dishonored check">{formatPhp(c.penalties.dishonoredCheck)}</Term>
         {/* Timeline 2 review: the fourth penalty in the Screen Inventory, and the DBL-CLT-008 fields (internal-only scope to be confirmed). */}
-        <Term label="Deferred check">{formatPhp(c.penalties.deferredCheck)}<span className="block text-xs font-normal text-muted">contract value · rule pending approval</span></Term>
+        <Term label="Deferred check">{formatPhp(c.penalties.deferredCheck)}<span className="block text-sm font-normal text-muted">contract value · rule pending approval</span></Term>
         <Term label="Payment method">{c.paymentMethod}</Term>
-        <Term label="Client signatory">{c.signatory ? <>{c.signatory.name}<span className="block text-xs font-normal text-muted">{c.signatory.email}</span></> : "—"}</Term>
+        <Term label="Client signatory">{c.signatory ? <>{c.signatory.name}<span className="block text-sm font-normal text-muted">{c.signatory.email}</span></> : "—"}</Term>
         <Term label="Region">{c.regionName}</Term>
         <Term label="Units contracted">{c.unitQty}</Term>
         <Term label="Signed">{signed ? formatDate(signed) : "—"}</Term>
@@ -164,12 +164,12 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       </dl>
 
       {/* Entitlement and daily rates for every equipment type. */}
-      <h3 className="mb-1 text-sm font-semibold text-ink">Equipment, entitlement and daily rates</h3>
-      <p className="mb-2 text-xs text-muted">Daily rates per unit, before 12% VAT · current version effective {formatDate(c.rateHistory?.at(-1)?.validFrom ?? c.effectiveDate)}. Rates follow the approved {c.contractType} rate card (BR-18).</p>
+      <h3 className="mb-1.5 text-base font-semibold tracking-tight text-ink">Equipment, entitlement and daily rates</h3>
+      <p className="mb-3 text-sm text-muted">Daily rates per unit, before 12% VAT · current version effective {formatDate(c.rateHistory?.at(-1)?.validFrom ?? c.effectiveDate)}. Rates follow the approved {c.contractType} rate card (BR-18).</p>
       <div className="mb-2 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-left text-sm font-medium text-muted">
               <th className="py-2 pr-3">Equipment type</th><th className="pr-3 text-right">Daily rate</th><th className="pr-3 text-right">Rate card</th>
               <th className="pr-3 text-right" title="Indemnity / loss value per unit — charged if a unit is lost or force-inbounded (BR-17)">Indemnity / loss</th>
               <th className="pr-3 text-right">Entitled</th><th className="pr-3 text-right">On hire</th>{c.status === "Active" && <><th className="pr-3 text-right">On open EWAs</th><th className="text-right">Can still request</th></>}
@@ -178,11 +178,11 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
           <tbody>
             {c.entitlement.map((e) => (
               <tr key={e.equipmentType} className={cn("border-b border-line last:border-0", e.entitled === 0 && "text-muted")}>
-                <td className="py-1.5 pr-3">{eqName(e.equipmentType)}</td>
+                <td className="py-2.5 pr-3">{eqName(e.equipmentType)}</td>
                 <td className="pr-3 text-right tabular">{formatPhp(e.dailyRate)}</td>
                 <td className="pr-3 text-right tabular text-muted">{e.rateCard != null ? (e.rateCard === e.dailyRate ? "same" : formatPhp(e.rateCard)) : "—"}</td>
                 <td className="pr-3 text-right tabular">{formatPhp(e.indemnity)}</td>
-                <td className="pr-3 text-right">{e.entitled == null ? <span className="text-xs">within the contract total</span> : e.entitled === 0 ? <span className="text-xs">Not entitled — on request</span> : <span className="tabular">{e.entitled}</span>}</td>
+                <td className="pr-3 text-right">{e.entitled == null ? <span className="text-sm">within the contract total</span> : e.entitled === 0 ? <span className="text-sm">Not entitled — on request</span> : <span className="tabular">{e.entitled}</span>}</td>
                 <td className={cn("pr-3 text-right tabular", e.onHire > (e.entitled ?? Infinity) && "font-medium text-danger")}>{e.onHire || "—"}</td>
                 {c.status === "Active" && <><td className="pr-3 text-right tabular">{e.pending || "—"}</td><td className="text-right tabular">{e.entitled === 0 ? "—" : e.remaining ?? "—"}</td></>}
               </tr>
@@ -196,7 +196,7 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
           )}
         </table>
       </div>
-      <p className="mb-5 text-xs text-muted">
+      <p className="mb-6 text-sm text-muted">
         “Not entitled — on request”: the type is on the rate card but not in this contract’s allocation; ask your Account Executive to add it
         (an amendment). Every unit on hire is of an entitled type. Indemnity / loss is the value charged per unit if it is lost or brought back by
         Force Inbound (BR-17). Where a rate differs in size order (for example the 20ft flatbed above the
@@ -206,18 +206,18 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       {/* BR-18 rate history. */}
       {!!c.rateHistory?.length && (
         <div className="mb-5">
-          <h3 className="mb-1 text-sm font-semibold text-ink">Rate history</h3>
-          <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+          <h3 className="mb-1.5 text-base font-semibold tracking-tight text-ink">Rate history</h3>
+          <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
             {[...c.rateHistory].reverse().map((v, i, all) => {
               const prev = all[i + 1];
               const changed = prev ? v.rates.filter((r) => prev.rates.find((p) => p.equipmentType === r.equipmentType)?.dailyRate !== r.dailyRate) : [];
               return (
-                <li key={v.version} className="px-3 py-2">
+                <li key={v.version} className="px-4 py-3">
                   <span className="font-medium">Version {v.version}</span> <span className="text-muted">· {formatDate(v.validFrom)} – {v.validTo ? formatDate(v.validTo) : "current"}</span>
-                  <span className="block text-xs text-muted">{v.reason}</span>
+                  <span className="block text-sm text-muted">{v.reason}</span>
                   {changed.length ? (
-                    <span className="block text-xs">{changed.map((r) => `${eqName(r.equipmentType)} ${formatPhp(prev!.rates.find((p) => p.equipmentType === r.equipmentType)?.dailyRate)} → ${formatPhp(r.dailyRate)}`).join(" · ")}</span>
-                  ) : !prev ? <span className="block text-xs text-muted">{v.rates.map((r) => `${eqName(r.equipmentType)} ${formatPhp(r.dailyRate)}`).join(" · ")}</span> : null}
+                    <span className="block text-sm">{changed.map((r) => `${eqName(r.equipmentType)} ${formatPhp(prev!.rates.find((p) => p.equipmentType === r.equipmentType)?.dailyRate)} → ${formatPhp(r.dailyRate)}`).join(" · ")}</span>
+                  ) : !prev ? <span className="block text-sm text-muted">{v.rates.map((r) => `${eqName(r.equipmentType)} ${formatPhp(r.dailyRate)}`).join(" · ")}</span> : null}
                 </li>
               );
             })}
@@ -226,19 +226,19 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       )}
 
       {/* Branches covered = the branches enabled for the account; every release and EWA should be inside them. */}
-      <h3 className="mb-1 text-sm font-semibold text-ink">Branches covered</h3>
+      <h3 className="mb-1.5 text-base font-semibold tracking-tight text-ink">Branches covered</h3>
       <p className="mb-2 text-sm text-ink-2">
         {c.branches.covered.map((b) => b.name).join(", ")}
-        <span className="block text-xs text-muted">The branches enabled for your account — the same list New EWA offers. Pickups and releases happen only at these branches. Every covered branch is listed below, with zeros where there has been no activity yet.</span>
+        <span className="block text-sm text-muted">The branches enabled for your account — the same list New EWA offers. Pickups and releases happen only at these branches. Every covered branch is listed below, with zeros where there has been no activity yet.</span>
       </p>
       {!!c.branches.activity.length && (
         <div className="mb-2 overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted"><th className="py-2 pr-3">Branch</th><th className="pr-3 text-right">EWAs</th><th className="pr-3 text-right">Releases</th><th className="pr-3 text-right">On hire now</th><th className="text-right">Covered</th></tr></thead>
+            <thead><tr className="border-b border-line text-left text-sm font-medium text-muted"><th className="py-2 pr-3">Branch</th><th className="pr-3 text-right">EWAs</th><th className="pr-3 text-right">Releases</th><th className="pr-3 text-right">On hire now</th><th className="text-right">Covered</th></tr></thead>
             <tbody>
               {c.branches.activity.map((a) => (
                 <tr key={a.code} className="border-b border-line last:border-0">
-                  <td className="py-1.5 pr-3">{a.name}</td><td className="pr-3 text-right tabular">{a.ewas}</td><td className="pr-3 text-right tabular">{a.releases}</td><td className="pr-3 text-right tabular">{a.onHire || "—"}</td>
+                  <td className="py-2.5 pr-3">{a.name}</td><td className="pr-3 text-right tabular">{a.ewas}</td><td className="pr-3 text-right tabular">{a.releases}</td><td className="pr-3 text-right tabular">{a.onHire || "—"}</td>
                   <td className="text-right">{a.covered ? <Badge tone="success" dot={false}>Yes</Badge> : <Badge tone="danger" dot={false}>No</Badge>}</td>
                 </tr>
               ))}
@@ -246,12 +246,12 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
           </table>
         </div>
       )}
-      <p className={cn("mb-5 text-xs", c.branches.outside.length ? "text-danger" : "text-muted")}>
+      <p className={cn("mb-6 text-sm", c.branches.outside.length ? "text-danger" : "text-muted")}>
         {c.branches.outside.length ? `Activity outside the covered branches: ${c.branches.outside.join(", ")} — your Account Executive will review it.` : "All EWAs and releases under this contract are inside the covered branches."}
       </p>
 
       <div className="mb-5 text-sm">
-        <p className="mb-1 text-xs font-medium text-muted">Units on hire under this contract ({c.onHireUnits.length})</p>
+        <p className="mb-2 text-sm font-medium text-muted">Units on hire under this contract ({c.onHireUnits.length})</p>
         {c.onHireUnits.length ? (
           <p className="flex flex-wrap gap-x-4 gap-y-1">{c.onHireUnits.map((u) => <span key={u.chassisNo}><span className="font-mono">{u.chassisNo}</span> <span className="text-muted">· {eqName(u.chassisType)} · {u.branchCode}</span></span>)}</p>
         ) : <p className="text-muted">None at the moment.</p>}
@@ -260,15 +260,15 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
       {/* Requests sent from the portal, with their status. */}
       {!!c.requests.length && (
         <div className="mb-5">
-          <p className="mb-1 text-xs font-medium text-muted">Your requests on this contract</p>
-          <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+          <p className="mb-2 text-sm font-medium text-muted">Your requests on this contract</p>
+          <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
             {c.requests.map((r) => (
-              <li key={r.id} className="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
+              <li key={r.id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3">
                 <span className="min-w-0">
                   <span className="font-mono">{r.id}</span> · {r.kind}{r.changeArea ? ` — ${r.changeArea}` : ""}{r.termMonths ? ` — ${r.termMonths} months` : ""}{r.effectiveDate ? ` — from ${formatDate(r.effectiveDate)}` : ""}
-                  <span className="block text-xs text-muted">Sent {formatDateTime(r.submittedAt)} · {r.details}</span>
-                  {r.feeEstimate != null && <span className="block text-xs text-muted">Pre-termination fee estimate {formatPhp(r.feeEstimate)}</span>}
-                  {r.decisionNote && <span className="block text-xs">{r.status} {formatDate(r.decidedAt)}{r.decidedByName ? ` by ${r.decidedByName}` : ""}: {r.decisionNote}</span>}
+                  <span className="block text-sm text-muted">Sent {formatDateTime(r.submittedAt)} · {r.details}</span>
+                  {r.feeEstimate != null && <span className="block text-sm text-muted">Pre-termination fee estimate {formatPhp(r.feeEstimate)}</span>}
+                  {r.decisionNote && <span className="block text-sm">{r.status} {formatDate(r.decidedAt)}{r.decidedByName ? ` by ${r.decidedByName}` : ""}: {r.decisionNote}</span>}
                 </span>
                 <Badge tone={r.status === "Approved" ? "success" : r.status === "Declined" ? "danger" : r.status === "Withdrawn" ? "neutral" : "warning"}>{r.status === "Submitted" ? "Sent — awaiting review" : r.status}</Badge>
               </li>
@@ -277,18 +277,18 @@ function ContractDetail({ c, eqName, onRequest }: { c: Ct; eqName: (c: string) =
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5 text-sm">
         {!!c.documents?.length && (
           <ul className="flex flex-wrap gap-x-5 gap-y-1">
             {c.documents.map((doc, i) => (
-              <li key={i} className="flex items-center gap-1.5"><FileText className="size-4 text-muted" /><span className="text-muted">{doc.kind}</span><span className="font-mono text-[13px] text-ink">{doc.fileName}</span></li>
+              <li key={i} className="flex items-center gap-1.5"><FileText className="size-4 text-muted" /><span className="text-muted">{doc.kind}</span><span className="font-mono text-sm text-ink">{doc.fileName}</span></li>
             ))}
           </ul>
         )}
         {c.status === "Active" && (
-          <span className="ml-auto flex flex-col items-end gap-1">
+          <span className="ml-auto flex flex-col items-end gap-1.5">
             <Button size="sm" variant="secondary" onClick={onRequest}>Request renewal / amendment / termination</Button>
-            {openReq && <span className="text-xs text-warning">{openReq.id} {openReq.kind.toLowerCase()} awaiting review</span>}
+            {openReq && <span className="text-sm text-warning">{openReq.id} {openReq.kind.toLowerCase()} awaiting review</span>}
           </span>
         )}
       </div>
@@ -317,10 +317,10 @@ function ContractRequestDialog({ c, onClose }: { c: Ct | null; onClose: () => vo
       footer={done ? <Button onClick={onClose}>Done</Button> : <><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={send.isPending} onClick={() => { setTried(true); if (ok) send.mutate(undefined); }}>Send request</Button></>}>
       {done ? (
         <Stack>
-          <div className="rounded-lg border border-brand-100 bg-brand-50 p-4 text-center">
-            <CheckCircle2 className="mx-auto mb-1 size-6 text-success" aria-hidden />
-            <p className="font-mono text-2xl font-bold text-brand-800">{done.id}</p>
-            <p className="text-sm text-ink-2">{done.kind} · status <strong>Sent — awaiting review</strong></p>
+          <div className="rounded-2xl bg-brand-50 p-6 text-center">
+            <CheckCircle2 className="mx-auto mb-2 size-6 text-success" aria-hidden />
+            <p className="font-mono text-3xl font-semibold tracking-tight text-ink">{done.id}</p>
+            <p className="mt-1.5 text-sm text-ink-2">{done.kind} · status <strong>Sent — awaiting review</strong></p>
           </div>
           <Banner tone="info">
             Your Account Executive and the Sales Director have been notified. A renewal or amendment comes back as a new contract version for signing;
@@ -358,7 +358,7 @@ function ContractRequestDialog({ c, onClose }: { c: Ct | null; onClose: () => vo
             error={(tried && v.details.trim().length < 10 ? "At least 10 characters" : undefined) ?? fieldErr("details")}
             placeholder={v.kind === "Renewal" ? "e.g. Renew for 12 months with the same units" : v.kind === "Amendment" ? "e.g. Add two 40ft flatbeds to our entitlement" : "e.g. Moving operations to Cebu; all units returned by the date"} />
           {send.error && <Banner tone="danger">{errMessage(send.error)}</Banner>}
-          <p className="text-xs text-muted">For a general question use <Link to="/client" className="text-brand-600 hover:underline">Send feedback</Link> in your account menu.</p>
+          <p className="text-sm text-muted">For a general question use <Link to="/client" className="text-brand-600 hover:underline">Send feedback</Link> in your account menu.</p>
         </Stack>
       )}
     </Modal>

@@ -43,7 +43,7 @@ export function BillingCoverage({ invs, cycle, week }: { invs: InvRow[]; cycle?:
   const nextEnd = manilaDay(addDays(`${nextStart}T12:00:00+08:00`, len - 1));
   const nextInvoice = manilaDay(addDays(`${nextEnd}T12:00:00+08:00`, 1));
   return (
-    <p className={cn("mb-3 rounded-lg border px-3 py-2 text-sm", gaps.length ? "border-warning-line bg-warning-bg" : "border-line bg-surface")}>
+    <p className={cn("mb-5 rounded-2xl px-4 py-3.5 text-sm", gaps.length ? "bg-warning-bg" : "bg-surface shadow-card")}>
       <span className="font-medium text-ink">Lease billing ({(cycle ?? "weekly").toLowerCase()}{week && (cycle ?? "Weekly") === "Weekly" ? `, ${week} weeks — proposed, Delbros to confirm` : ""}):</span>{" "}
       invoiced from {formatDate(lease[0].periodStart)} to {formatDate(last.periodEnd)}{gaps.length ? <span className="text-warning"> — not yet billed: {gaps.join(", ")}</span> : " with no gaps"}.
       {" "}The current period {formatDate(nextStart)} – {formatDate(nextEnd)} accrues daily and is invoiced on {formatDate(nextInvoice)}.
@@ -143,10 +143,10 @@ function FileField({ file, sizeMb, error, optional, onChange }: { file: string; 
   return (
     <Field label={optional ? "Supporting file (optional)" : "Proof of payment"} required={!optional} error={error} hint="One file — PDF, JPG or PNG, max 5 MB">
       {(id, d) => (
-        <label htmlFor={id} className="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-line-strong p-4 text-sm text-muted hover:border-brand-300">
-          <Upload className="size-5" />
+        <label htmlFor={id} className="flex cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-line-strong bg-surface-alt p-5 text-sm text-muted transition-[border-color,box-shadow] duration-150 hover:border-brand-600 focus-within:border-brand-600 focus-within:ring-4 focus-within:ring-brand-600/12">
+          <Upload className="size-5 shrink-0" aria-hidden />
           <span className={cn("min-w-0 flex-1 truncate", file && "text-ink")}>{file ? `${file}${sizeMb ? ` · ${sizeMb.toFixed(1)} MB` : ""}` : "Upload the bank slip, deposit slip or confirmation"}</span>
-          {file && <button type="button" aria-label="Remove file" onClick={(e) => { e.preventDefault(); onChange("", 0); }}><X className="size-4" /></button>}
+          {file && <button type="button" aria-label="Remove file" className="relative shrink-0 text-muted transition-colors duration-150 before:absolute before:-inset-2 hover:text-ink" onClick={(e) => { e.preventDefault(); onChange("", 0); }}><X className="size-4" /></button>}
           <input id={id} aria-describedby={d} type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; onChange(f?.name ?? "", f ? f.size / 1048576 : 0); e.target.value = ""; }} />
         </label>
       )}

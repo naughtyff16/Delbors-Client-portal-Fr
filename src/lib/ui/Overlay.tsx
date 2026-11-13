@@ -17,6 +17,8 @@ function useEscape(open: boolean, onClose: () => void) {
   }, [open, onClose]);
 }
 
+const closeBtn = 'flex size-10 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-ink/5 hover:text-ink';
+
 export function Modal({ open, onClose, title, description, children, footer, size = 'md' }: { open: boolean; onClose: () => void; title: ReactNode; description?: ReactNode; children?: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl' | 'doc' }) {
   useEscape(open, onClose);
   const ref = useRef<HTMLDivElement>(null);
@@ -25,15 +27,16 @@ export function Modal({ open, onClose, title, description, children, footer, siz
   // 'doc' fits an A4 print preview at readable size.
   const w = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', doc: 'max-w-5xl' }[size];
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4 pt-[6vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/45 p-4 pt-[6vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       {/* Header and footer stay fixed; only the body scrolls, so action buttons are always visible however tall the form is. */}
-      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" className={cn('flex max-h-[88vh] w-full flex-col rounded-xl border border-line bg-surface shadow-xl outline-none', w)}>
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div className="min-w-0"><h2 className="text-base font-semibold text-ink">{title}</h2>{description && <p className="mt-0.5 text-[13px] text-muted">{userText(description)}</p>}</div>
-          <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-surface-alt" aria-label="Close"><X className="size-4" /></button>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" className={cn('flex max-h-[88vh] w-full animate-pop flex-col rounded-3xl bg-surface shadow-pop outline-none', w)}>
+        <div className="flex shrink-0 items-start justify-between gap-4 pb-2 pl-6 pr-4 pt-5">
+          <div className="min-w-0 pt-1"><h2 className="text-xl font-semibold tracking-tight text-ink">{title}</h2>{description && <p className="mt-1 text-sm text-muted">{userText(description)}</p>}</div>
+          <button onClick={onClose} className={closeBtn} aria-label="Close"><X className="size-5" /></button>
         </div>
-        {children && <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>}
-        {footer && <div className="flex shrink-0 justify-end gap-2 rounded-b-xl border-t border-line bg-surface-alt/60 px-5 py-3">{footer}</div>}
+        {children && <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">{children}</div>}
+        {/* Phones: actions stack full width with the main action on top. From tablet up they sit in a row on the right. */}
+        {footer && <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-line px-6 py-4 sm:flex-row sm:flex-wrap sm:justify-end [&>*]:w-full sm:[&>*]:w-auto">{footer}</div>}
       </div>
     </div>,
     document.body,
@@ -44,15 +47,15 @@ export function Drawer({ open, onClose, title, children, footer, width = 'max-w-
   useEscape(open, onClose);
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-50 flex justify-end bg-ink/30" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink/45" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       {/* Drawers use at least 75% of the viewport on tablet and up (full width on phones); min-width wins over any narrower max-w passed in. */}
-      <aside role="dialog" aria-modal="true" className={cn('flex h-full w-full flex-col border-l border-line bg-surface shadow-xl', width, 'md:min-w-[75vw]')}>
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <h2 className="text-base font-semibold text-ink">{title}</h2>
-          <button onClick={onClose} className="rounded-md p-1 text-muted hover:bg-surface-alt" aria-label="Close"><X className="size-4" /></button>
+      <aside role="dialog" aria-modal="true" className={cn('flex h-full w-full flex-col bg-surface shadow-pop', width, 'md:min-w-[75vw]')}>
+        <div className="flex items-center justify-between gap-4 pb-2 pl-6 pr-4 pt-5">
+          <h2 className="text-xl font-semibold tracking-tight text-ink">{title}</h2>
+          <button onClick={onClose} className={closeBtn} aria-label="Close"><X className="size-5" /></button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
+        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
+        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-6 py-4">{footer}</div>}
       </aside>
     </div>,
     document.body,
@@ -72,7 +75,7 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message, confir
         <Button variant={tone === 'danger' ? 'danger' : 'primary'} loading={loading} disabled={requireReason && !reason.trim()} onClick={() => onConfirm(reason)}>{confirmLabel}</Button>
       </>}>
       {message && <div className="text-sm text-ink-2">{message}</div>}
-      {requireReason && <Textarea className="mt-3" label="Reason" required value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Recorded in the audit trail" wrapperClassName="mt-3" />}
+      {requireReason && <Textarea label="Reason" required value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Recorded in the audit trail" wrapperClassName="mt-4" />}
     </Modal>
   );
 }

@@ -72,7 +72,7 @@ export function DatePicker({ value, onChange, withTime = false, min, max, id, na
   // Position the popover against the trigger (fixed, in a portal) so dialogs and scroll areas never clip it.
   const place = useCallback(() => {
     const r = trigger.current?.getBoundingClientRect(); if (!r) return;
-    const h = pop.current?.offsetHeight ?? 360, w = pop.current?.offsetWidth ?? 296;
+    const h = pop.current?.offsetHeight ?? 360, w = pop.current?.offsetWidth ?? 316;
     const up = r.bottom + h + 8 > window.innerHeight && r.top - h - 8 > 0;
     setPos({ top: up ? r.top - h - 6 : r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)), up });
   }, []);
@@ -113,26 +113,26 @@ export function DatePicker({ value, onChange, withTime = false, min, max, id, na
       <button ref={trigger} type="button" id={id} name={name} title={title} disabled={disabled} aria-haspopup="dialog" aria-expanded={open} aria-required={required} aria-invalid={invalid}
         aria-label={aria['aria-label'] ? `${aria['aria-label']}${shown ? `: ${shown}` : ''}` : undefined} aria-describedby={aria['aria-describedby']}
         onClick={() => (open ? close() : openPicker())} onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); openPicker(); } }}
-        className={cn('flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line-strong bg-surface px-3 text-left text-sm text-ink transition-colors focus:border-brand-600 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-surface-alt disabled:text-muted',
-          open && 'border-brand-600 ring-3 ring-brand-100', invalid && 'border-danger! focus:border-danger! focus:ring-danger-bg', className)}>
+        className={cn('flex h-11 w-full items-center justify-between gap-2 rounded-xl border border-line-strong bg-surface px-3.5 text-left text-base text-ink transition-[border-color,box-shadow] duration-150 hover:border-ink/35 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/12 disabled:cursor-not-allowed disabled:bg-surface-alt disabled:text-muted disabled:hover:border-line-strong sm:text-sm',
+          open && 'border-brand-600 ring-4 ring-brand-600/12', invalid && 'border-danger! focus:border-danger! focus:ring-danger/12', className)}>
         <span className={cn('truncate', !shown && 'text-disabled')}>{shown || placeholder || (withTime ? 'Select date & time' : 'Select date')}</span>
         <CalendarDays className="size-4 shrink-0 text-muted" aria-hidden />
       </button>
       {open && createPortal(
         <div ref={pop} role="dialog" aria-label={withTime ? 'Choose date and time' : 'Choose date'} style={{ top: pos.top, left: pos.left }}
-          className="fixed z-[70] w-[296px] rounded-xl border border-line bg-surface p-3 shadow-xl" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } }}>
+          className="fixed z-[70] w-[316px] animate-pop rounded-2xl bg-surface p-3.5 shadow-pop" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } }}>
           <div className="mb-2 flex items-center gap-1">
-            <button type="button" className="rounded-md p-1.5 text-muted hover:bg-surface-alt hover:text-ink" aria-label="Previous month" onClick={() => shift(-1)}><ChevronLeft className="size-4" /></button>
-            <select aria-label="Month" className="h-8 flex-1 rounded-md border border-line bg-surface px-2 text-sm font-semibold text-ink" value={view.m} onChange={(e) => setView({ ...view, m: +e.target.value })}>
+            <button type="button" className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-ink/5 hover:text-ink" aria-label="Previous month" onClick={() => shift(-1)}><ChevronLeft className="size-4" /></button>
+            <select aria-label="Month" className="h-9 flex-1 rounded-lg border border-line-strong bg-surface px-2.5 text-sm font-semibold text-ink" value={view.m} onChange={(e) => setView({ ...view, m: +e.target.value })}>
               {MONTHS_LONG.map((l, i) => <option key={l} value={i}>{l}</option>)}
             </select>
-            <select aria-label="Year" className="h-8 w-[86px] rounded-md border border-line bg-surface px-2 text-sm font-semibold text-ink tabular" value={view.y} onChange={(e) => setView({ ...view, y: +e.target.value })}>
+            <select aria-label="Year" className="h-9 w-[96px] rounded-lg border border-line-strong bg-surface px-2.5 text-sm font-semibold text-ink tabular" value={view.y} onChange={(e) => setView({ ...view, y: +e.target.value })}>
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
-            <button type="button" className="rounded-md p-1.5 text-muted hover:bg-surface-alt hover:text-ink" aria-label="Next month" onClick={() => shift(1)}><ChevronRight className="size-4" /></button>
+            <button type="button" className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-ink/5 hover:text-ink" aria-label="Next month" onClick={() => shift(1)}><ChevronRight className="size-4" /></button>
           </div>
           <div role="grid" aria-label={`${MONTHS_LONG[view.m]} ${view.y}`} onKeyDown={onGridKey}>
-            <div role="row" className="grid grid-cols-7">{WEEKDAYS.map((w) => <span key={w} role="columnheader" className="py-1 text-center text-[11px] font-semibold uppercase text-muted">{w}</span>)}</div>
+            <div role="row" className="grid grid-cols-7">{WEEKDAYS.map((w) => <span key={w} role="columnheader" className="py-1.5 text-center text-sm font-medium text-muted">{w}</span>)}</div>
             {Array.from({ length: 6 }, (_, r) => (
               <div role="row" key={r} className="grid grid-cols-7">
                 {grid.slice(r * 7, r * 7 + 7).map((d) => {
@@ -141,7 +141,7 @@ export function DatePicker({ value, onChange, withTime = false, min, max, id, na
                     <button key={key(d)} type="button" role="gridcell" aria-selected={isSel} aria-disabled={off} disabled={off} tabIndex={isFocus ? 0 : -1} data-focus={isFocus}
                       aria-label={`${d.d} ${MONTHS_LONG[d.m]} ${d.y}${isToday ? ' (today)' : ''}`}
                       onClick={() => { setFocus(d); emit(d); if (!withTime) close(); }}
-                      className={cn('m-0.5 flex h-8 items-center justify-center rounded-md text-[13px] tabular transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600',
+                      className={cn('m-0.5 flex h-9 items-center justify-center rounded-full text-sm tabular transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600',
                         isSel ? 'bg-brand-600 font-semibold text-white' : inMonth ? 'text-ink hover:bg-brand-50' : 'text-disabled hover:bg-surface-alt',
                         isToday && !isSel && 'font-semibold text-brand-700 ring-1 ring-inset ring-brand-300', off && 'cursor-not-allowed opacity-35 hover:bg-transparent')}>
                       {d.d}
@@ -152,24 +152,24 @@ export function DatePicker({ value, onChange, withTime = false, min, max, id, na
             ))}
           </div>
           {withTime && (
-            <div className="mt-2 flex items-center gap-2 border-t border-line pt-2">
+            <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
               <Clock className="size-4 text-muted" aria-hidden />
-              <select aria-label="Hour" className="h-8 rounded-md border border-line bg-surface px-2 text-sm tabular" value={time.h} disabled={!sel} onChange={(e) => emit(sel, { ...time, h: +e.target.value })}>
+              <select aria-label="Hour" className="h-9 rounded-lg border border-line-strong bg-surface px-2.5 text-sm tabular" value={time.h} disabled={!sel} onChange={(e) => emit(sel, { ...time, h: +e.target.value })}>
                 {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{pad(h)}</option>)}
               </select>
               <span className="text-muted">:</span>
-              <select aria-label="Minute" className="h-8 rounded-md border border-line bg-surface px-2 text-sm tabular" value={time.mi} disabled={!sel} onChange={(e) => emit(sel, { ...time, mi: +e.target.value })}>
+              <select aria-label="Minute" className="h-9 rounded-lg border border-line-strong bg-surface px-2.5 text-sm tabular" value={time.mi} disabled={!sel} onChange={(e) => emit(sel, { ...time, mi: +e.target.value })}>
                 {Array.from({ length: 60 }, (_, m) => <option key={m} value={m}>{pad(m)}</option>)}
               </select>
-              {!sel && <span className="text-xs text-muted">Pick a day first</span>}
+              {!sel && <span className="text-sm text-muted">Pick a day first</span>}
             </div>
           )}
-          <div className="mt-2 flex items-center justify-between border-t border-line pt-2">
-            <button type="button" disabled={!!outOfRange(today)} className="rounded-md px-2 py-1 text-[13px] font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:text-disabled"
+          <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
+            <button type="button" disabled={!!outOfRange(today)} className="h-9 rounded-full px-3.5 text-sm font-medium text-brand-700 transition-colors duration-150 hover:bg-brand-50 disabled:cursor-not-allowed disabled:text-disabled disabled:hover:bg-transparent"
               onClick={() => { const n = new Date(); emit(today, withTime ? { h: n.getHours(), mi: n.getMinutes() } : time); if (!withTime) close(); else { setView({ y: today.y, m: today.m }); setFocus(today); } }}>{withTime ? 'Now' : 'Today'}</button>
             <span className="flex gap-1">
-              {!required && <button type="button" className="rounded-md px-2 py-1 text-[13px] font-medium text-muted hover:bg-surface-alt hover:text-ink" onClick={() => { emit(null); close(); }}>Clear</button>}
-              {withTime && <button type="button" className="rounded-md bg-brand-600 px-3 py-1 text-[13px] font-medium text-white hover:bg-brand-700" onClick={() => close()}>Done</button>}
+              {!required && <button type="button" className="h-9 rounded-full px-3.5 text-sm font-medium text-muted transition-colors duration-150 hover:bg-ink/5 hover:text-ink" onClick={() => { emit(null); close(); }}>Clear</button>}
+              {withTime && <button type="button" className="h-9 rounded-full bg-brand-600 px-4 text-sm font-medium text-white transition-colors duration-150 hover:bg-brand-700" onClick={() => close()}>Done</button>}
             </span>
           </div>
         </div>,

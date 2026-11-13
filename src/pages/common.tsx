@@ -1,6 +1,6 @@
 // Pieces shared by the sign-in pages, the portal shell and the client pages (portal sign-in review, 2026-11-11).
 import { useEffect, useState } from 'react';
-import { Check, Mail, Phone } from 'lucide-react';
+import { Check, Mail, Minus, Phone } from 'lucide-react';
 import { api, type PortalContact } from '../lib/api-client';
 import { loadAppConfig, passwordChecks, type AppConfig } from '../lib/shared';
 import { Button, Modal, cn } from '../lib/ui';
@@ -23,10 +23,10 @@ export function useNow(active = true) {
 export function ContactLine({ contact, className }: { contact?: PortalContact | null; className?: string }) {
   if (!contact) return null;
   return (
-    <p className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]', className)}>
+    <p className={cn('flex flex-wrap items-center gap-x-4 gap-y-1 text-sm', className)}>
       <span className="font-medium">{contact.name ? <>{contact.name} <span className="font-normal opacity-80">· {contact.role}</span></> : contact.role}</span>
-      {contact.phone && <a className="inline-flex items-center gap-1 underline-offset-2 hover:underline" href={`tel:${contact.phone.replace(/\s/g, '')}`}><Phone className="size-3.5" aria-hidden />{contact.phone}</a>}
-      {contact.email && <a className="inline-flex items-center gap-1 underline-offset-2 hover:underline" href={`mailto:${contact.email}`}><Mail className="size-3.5" aria-hidden />{contact.email}</a>}
+      {contact.phone && <a className="inline-flex items-center gap-1.5 underline-offset-2 hover:underline" href={`tel:${contact.phone.replace(/\s/g, '')}`}><Phone className="size-4" aria-hidden />{contact.phone}</a>}
+      {contact.email && <a className="inline-flex items-center gap-1.5 underline-offset-2 hover:underline" href={`mailto:${contact.email}`}><Mail className="size-4" aria-hidden />{contact.email}</a>}
     </p>
   );
 }
@@ -34,10 +34,10 @@ export function ContactLine({ contact, className }: { contact?: PortalContact | 
 /** Live password checklist — the rules come from System settings (minimum length) and are re-checked by the server. */
 export function PasswordRules({ password, minLength, email, className }: { password: string; minLength: number; email?: string; className?: string }) {
   return (
-    <ul className={cn('grid gap-x-4 gap-y-1 text-[13px] sm:grid-cols-2', className)} aria-label="Password rules" aria-live="polite">
+    <ul className={cn('grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2', className)} aria-label="Password rules" aria-live="polite">
       {passwordChecks(password, minLength, email).map((r) => (
-        <li key={r.key} className={cn('flex items-center gap-1.5', r.ok ? 'font-medium text-success' : 'text-muted')}>
-          {r.ok ? <Check className="size-3.5" aria-hidden /> : <span className="mx-[5px] size-1.5 rounded-full bg-disabled" aria-hidden />}
+        <li key={r.key} className={cn('flex items-center gap-1.5', r.ok ? 'text-success' : 'text-muted')}>
+          {r.ok ? <Check className="size-4 shrink-0" aria-hidden /> : <Minus className="size-4 shrink-0" aria-hidden />}
           {r.label}<span className="sr-only">{r.ok ? ' — met' : ' — not met yet'}</span>
         </li>
       ))}
@@ -48,7 +48,7 @@ export function PasswordRules({ password, minLength, email, className }: { passw
 /** Data Privacy Act of 2012 (RA 10173) notice — shown from the sign-in page, the access request form and the portal footer. */
 export function PrivacyNoticeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const dpo = api.auth.policy().dpoEmail;
-  const h = 'mt-4 font-semibold text-ink first:mt-0';
+  const h = 'mt-5 text-base font-semibold text-ink first:mt-0';
   return (
     <Modal open={open} onClose={onClose} size="lg" title="Privacy notice" description="Delbros Leasing client & vendor portal — Data Privacy Act of 2012 (Republic Act No. 10173)"
       footer={<Button onClick={onClose}>Close</Button>}>

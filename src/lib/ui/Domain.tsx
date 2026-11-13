@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import SignaturePadLib from 'signature_pad';
-import { Check, Copy, Eraser } from 'lucide-react';
+import { Check, Clock, Copy, Eraser, Minus, X } from 'lucide-react';
 import { formatDateTime, formatPhp, ROLE_TEMPLATES, type ApprovalStep, type InspectionLine, type WorkflowInstance } from '../shared';
 import { Button } from './Button';
 import { StatusBadge } from './Badge';
@@ -15,10 +15,10 @@ export function DocNo({ value, className }: { value?: string; className?: string
   const [copied, setCopied] = useState(false);
   if (!value) return <span className="text-muted">—</span>;
   return (
-    <span className={cn('inline-flex items-center gap-1 font-mono text-[13px] font-medium text-ink', className)}>
+    <span className={cn('inline-flex items-center gap-1 font-mono text-sm font-medium text-ink', className)}>
       {value}
-      <button type="button" aria-label={`Copy ${value}`} onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }).catch(() => {}); }}
-        className="rounded p-0.5 text-disabled hover:bg-surface-alt hover:text-muted no-print">{copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}</button>
+      <button type="button" aria-label={`Copy ${value}`} onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {}); }}
+        className="relative rounded p-0.5 text-muted transition-colors duration-150 before:absolute before:-inset-2 hover:text-ink no-print">{copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}</button>
     </span>
   );
 }
@@ -40,9 +40,10 @@ export function ApprovalTimeline({ workflow, userName }: { workflow: WorkflowIns
         return (
           <li key={s.step} className="flex gap-3">
             <div className="flex flex-col items-center">
-              <span className={cn('flex size-7 items-center justify-center rounded-full border-2 text-xs font-semibold',
-                s.decision === 'Approved' ? 'border-success bg-success-bg text-success' : s.decision === 'Rejected' ? 'border-danger bg-danger-bg text-danger' : current ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-line-strong bg-surface text-muted')}>
-                {s.step}
+              <span className={cn('flex size-7 items-center justify-center rounded-full',
+                s.decision === 'Approved' ? 'bg-success-bg text-success' : s.decision === 'Rejected' ? 'bg-danger-bg text-danger' : current ? 'bg-brand-50 text-brand-700' : 'bg-surface-alt text-muted')}>
+                {/* A state icon, not a step number: the order is already given by the list. */}
+                {s.decision === 'Approved' ? <Check className="size-4" aria-hidden /> : s.decision === 'Rejected' ? <X className="size-4" aria-hidden /> : current ? <Clock className="size-4" aria-hidden /> : <Minus className="size-4" aria-hidden />}
               </span>
               {i < workflow.steps.length - 1 && <span className="mt-1 w-px flex-1 bg-line" />}
             </div>
@@ -51,11 +52,11 @@ export function ApprovalTimeline({ workflow, userName }: { workflow: WorkflowIns
                 <p className="text-sm font-medium text-ink">{s.label}</p>
                 <StatusBadge domain="approval" value={decision} />
               </div>
-              <p className="text-xs text-muted">{s.roles.map((r) => (ROLE_TEMPLATES as Record<string, { label: string }>)[r]?.label.replace(/\s*\(Officer.*\)$/, '') ?? r.replaceAll('_', ' ')).join(' + ')}{s.dueAt && current ? ` · due ${formatDateTime(s.dueAt)}` : ''}</p>
+              <p className="text-sm text-muted">{s.roles.map((r) => (ROLE_TEMPLATES as Record<string, { label: string }>)[r]?.label.replace(/\s*\(Officer.*\)$/, '') ?? r.replaceAll('_', ' ')).join(' + ')}{s.dueAt && current ? ` · due ${formatDateTime(s.dueAt)}` : ''}</p>
               {sigs.map((g, k) => (
-                <p key={k} className="mt-1 text-[13px] text-ink-2"><span className="font-medium">{userName?.(g.user) ?? g.user}</span>{g.text && <> — “{g.text}”</>}</p>
+                <p key={k} className="mt-1 text-sm text-ink-2"><span className="font-medium">{userName?.(g.user) ?? g.user}</span>{g.text && <> — “{g.text}”</>}</p>
               ))}
-              {s.decidedAt && <p className="text-xs text-muted">{formatDateTime(s.decidedAt)}</p>}
+              {s.decidedAt && <p className="text-sm text-muted">{formatDateTime(s.decidedAt)}</p>}
             </div>
           </li>
         );
@@ -70,15 +71,15 @@ const isTire = (part: string) => /tire|tyre/i.test(part);
 /** Gate checklist (GP2 Rev.2 Parts Status table). Shared by Gate Out, Gate In and Park & Fix. */
 export function InspectionChecklist({ lines, onChange, showCharges = true, readOnly }: { lines: InspectionLine[]; onChange?: (l: InspectionLine[]) => void; showCharges?: boolean; readOnly?: boolean }) {
   const set = (i: number, patch: Partial<InspectionLine>) => onChange?.(lines.map((l, k) => (k === i ? { ...l, ...patch } : l)));
-  const cell = 'h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-[13px] focus:border-brand-600 focus:outline-none';
+  const cell = 'h-10 w-full rounded-lg border border-line-strong bg-surface px-2.5 text-sm transition-[border-color,box-shadow] duration-150 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/12';
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto rounded-2xl border border-line">
       <div className="flex items-center justify-between border-b border-line bg-surface-alt px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Parts status</span>
+        <span className="text-sm font-semibold text-muted">Parts status</span>
         {!readOnly && <Button size="sm" variant="ghost" onClick={() => onChange?.(lines.map((l) => ({ ...l, statusCode: 'OK', chargeable: 0 })))}>Mark all OK</Button>}
       </div>
-      <table className="w-full text-[13px]">
-        <thead><tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-sm text-muted">
           <th className="px-3 py-2">Part</th><th className="px-2 py-2">Branding</th><th className="px-2 py-2">Tread depth</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 w-16">Qty</th>{showCharges && <th className="px-3 py-2 text-right">Chargeable ₱</th>}
         </tr></thead>
         <tbody>
@@ -99,7 +100,7 @@ export function InspectionChecklist({ lines, onChange, showCharges = true, readO
           ))}
         </tbody>
         {showCharges && (
-          <tfoot><tr className="border-t border-line bg-surface-alt"><td colSpan={5} className="px-3 py-2 text-right text-xs font-semibold uppercase text-muted">Total chargeable damages</td>
+          <tfoot><tr className="border-t border-line bg-surface-alt"><td colSpan={5} className="px-3 py-2 text-right text-sm font-medium text-muted">Total chargeable damages</td>
             <td className="px-3 py-2 text-right font-semibold tabular">{formatPhp(lines.reduce((a, l) => a + (l.chargeable || 0), 0))}</td></tr></tfoot>
         )}
       </table>
@@ -122,11 +123,11 @@ export function SignaturePad({ value, onChange, label = 'Driver signature' }: { 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[13px] font-medium text-ink-2">{label}<span className="ml-0.5 text-danger">*</span></span>
+        <span className="text-sm font-medium text-ink-2">{label}<span className="ml-0.5 text-danger">*</span></span>
         <Button size="sm" variant="ghost" icon={<Eraser className="size-4" />} onClick={() => { pad.current?.clear(); onChange(undefined); }}>Clear</Button>
       </div>
-      <canvas ref={canvas} className={cn('h-36 w-full touch-none rounded-lg border-2 border-dashed bg-surface', value ? 'border-success-line' : 'border-line-strong')} aria-label="Signature area" />
-      <p className="text-xs text-muted">{value ? 'Signature captured.' : 'Sign inside the box with a finger, stylus or mouse.'}</p>
+      <canvas ref={canvas} className={cn('h-36 w-full touch-none rounded-2xl border-2 border-dashed bg-surface', value ? 'border-success-line' : 'border-line-strong')} aria-label="Signature area" />
+      <p className="text-sm text-muted">{value ? 'Signature captured.' : 'Sign inside the box with a finger, stylus or mouse.'}</p>
     </div>
   );
 }
@@ -137,7 +138,7 @@ export function KeyValueGrid({ items, cols = 4 }: { items: { label: ReactNode; v
     <dl className={cn('grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2', c)}>
       {items.map((it, i) => (
         <div key={i} className="min-w-0">
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted">{it.label}</dt>
+          <dt className="text-sm font-medium text-muted">{it.label}</dt>
           <dd className="mt-1 break-words text-sm text-ink">{it.value ?? '—'}</dd>
         </div>
       ))}

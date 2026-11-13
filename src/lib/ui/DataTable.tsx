@@ -28,6 +28,8 @@ export interface DataTableProps<T> {
   initialSort?: SortingState;
   /** Optional totals / summary bar shown under the rows, inside the table frame. */
   footer?: ReactNode;
+  /** Draw the card surface around the table (default). Pass false when the table already sits inside a Card, so two rounded surfaces never nest. */
+  frame?: boolean;
 }
 
 function toCsv<T>(rows: T[], cols: ColumnDef<T, unknown>[]) {
@@ -52,7 +54,7 @@ const STICKY_HEAD = 'w-px';
 const STICKY_CELL = 'w-px';
 
 /** Sticky header, sorting, client-side search + pagination, CSV export (docs/03 §6). Server pagination replaces this when the API is live. */
-export function DataTable<T>({ data, columns, loading, searchable = true, searchPlaceholder = 'Search…', toolbar, emptyTitle = 'No records found', emptyHint, onRowClick, pageSize = 25, exportName, rowClassName, dense, initialSort, footer }: DataTableProps<T>) {
+export function DataTable<T>({ data, columns, loading, searchable = true, searchPlaceholder = 'Search…', toolbar, emptyTitle = 'No records found', emptyHint, onRowClick, pageSize = 25, exportName, rowClassName, dense, initialSort, footer, frame = true }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSort ?? []);
   const [globalFilter, setGlobalFilter] = useState('');
   const rows = useMemo(() => data ?? [], [data]);
@@ -97,19 +99,19 @@ export function DataTable<T>({ data, columns, loading, searchable = true, search
   useEffect(() => { const r = requestAnimationFrame(measure); return () => cancelAnimationFrame(r); }, [tight, measure]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
+    <div className={cn(frame && 'overflow-hidden rounded-card bg-surface shadow-card')}>
       {(searchable || toolbar || exportName) && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 px-6 pb-3 pt-5">
           {searchable && (
-            <div className="relative w-full shrink-0 sm:w-64">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-disabled" />
-              <input value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} placeholder={searchPlaceholder} aria-label="Search table"
-                className="h-9 w-full rounded-lg border border-line-strong bg-surface pl-8 pr-3 text-sm focus:border-brand-600 focus:outline-none focus:ring-3 focus:ring-brand-100" />
+            <div className="relative w-full shrink-0 sm:w-72">
+              <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted" />
+              <input type="search" spellCheck={false} autoComplete="off" value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} placeholder={searchPlaceholder} aria-label="Search table"
+                className="h-11 w-full rounded-full border border-line-strong bg-surface pl-10 pr-4 text-base text-ink placeholder:text-disabled transition-[border-color,box-shadow] duration-150 hover:border-ink/35 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/12 sm:text-sm [&::-webkit-search-cancel-button]:hidden" />
             </div>
           )}
           {/* Form fields (Select / Input) share the row evenly (9–13rem each); segmented switches, buttons and date ranges keep their natural width. */}
-          <div className="flex flex-1 flex-wrap items-center gap-2 [&>[data-field]]:min-w-36 [&>[data-field]]:max-w-52 [&>[data-field]]:flex-1">{toolbar}</div>
-          {exportName && <Button className="ml-auto h-9 shrink-0" variant="secondary" size="sm" icon={<Download className="size-4" />} onClick={exportCsv}>Export</Button>}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3 [&>[data-field]]:min-w-36 [&>[data-field]]:max-w-52 [&>[data-field]]:flex-1">{toolbar}</div>
+          {exportName && <Button className="ml-auto shrink-0" variant="secondary" icon={<Download className="size-4" />} onClick={exportCsv}>Export</Button>}
         </div>
       )}
       {loading ? <TableSkeleton /> : filtered === 0 ? <EmptyState title={emptyTitle} hint={emptyHint} /> : (
@@ -117,19 +119,20 @@ export function DataTable<T>({ data, columns, loading, searchable = true, search
         {edge.left && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 z-20 w-4 bg-gradient-to-r from-ink/10 to-transparent" />}
         {edge.right && <span aria-hidden className="pointer-events-none absolute inset-y-0 right-0 z-20 w-6 bg-gradient-to-l from-ink/15 to-transparent" />}
         <div ref={scroller} onScroll={measure} className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead className="sticky top-0 z-10 bg-surface-alt">
+          {/* Edge cells line up with the card's 24px padding; rows are separated by hairlines only. */}
+          <table className="w-full border-collapse text-sm [&_td:first-child]:pl-6 [&_td:last-child]:pr-6 [&_th:first-child]:pl-6 [&_th:last-child]:pr-6">
+            <thead className="sticky top-0 z-10 bg-surface">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id}>
                   {hg.headers.map((h) => {
                     const sorted = h.column.getIsSorted();
                     const meta = h.column.columnDef.meta as { align?: 'right' | 'center' } | undefined;
                     return (
-                      <th key={h.id} scope="col" className={cn('whitespace-nowrap border-b border-line py-2.5', tight ? 'px-1.5' : 'px-2.5', ' text-left text-[11px] font-semibold uppercase tracking-wide text-muted', meta?.align === 'right' && 'text-right', meta?.align === 'center' && 'text-center', isAction(h.column.columnDef) && STICKY_HEAD)}>
+                      <th key={h.id} scope="col" className={cn('whitespace-nowrap border-b border-line py-3', tight ? 'px-2' : 'px-3', 'text-left text-sm font-medium text-muted', meta?.align === 'right' && 'text-right', meta?.align === 'center' && 'text-center', isAction(h.column.columnDef) && STICKY_HEAD)}>
                         {h.isPlaceholder ? null : h.column.getCanSort() ? (
-                          <button className="inline-flex items-center gap-1 uppercase hover:text-ink" onClick={h.column.getToggleSortingHandler()}>
+                          <button className="inline-flex items-center gap-1.5 transition-colors duration-150 hover:text-ink" onClick={h.column.getToggleSortingHandler()}>
                             {flexRender(h.column.columnDef.header, h.getContext())}
-                            {sorted === 'asc' ? <ArrowUp className="size-3" /> : sorted === 'desc' ? <ArrowDown className="size-3" /> : <ArrowUpDown className="size-3 opacity-35" aria-hidden />}
+                            {sorted === 'asc' ? <ArrowUp className="size-3.5" /> : sorted === 'desc' ? <ArrowDown className="size-3.5" /> : <ArrowUpDown className="size-3.5 opacity-35" aria-hidden />}
                           </button>
                         ) : flexRender(h.column.columnDef.header, h.getContext())}
                       </th>
@@ -141,11 +144,11 @@ export function DataTable<T>({ data, columns, loading, searchable = true, search
             <tbody>
               {table.getRowModel().rows.map((r) => (
                 <tr key={r.id} onClick={onRowClick ? () => onRowClick(r.original) : undefined}
-                  className={cn('group border-b border-line last:border-0 transition-colors', onRowClick && 'cursor-pointer hover:bg-brand-50/50', rowClassName?.(r.original))}>
+                  className={cn('group border-b border-line transition-colors duration-150 last:border-0', onRowClick && 'cursor-pointer hover:bg-brand-50/60', rowClassName?.(r.original))}>
                   {r.getVisibleCells().map((c) => {
                     const meta = c.column.columnDef.meta as { align?: 'right' | 'center' } | undefined;
                     const action = isAction(c.column.columnDef);
-                    return <td key={c.id} className={cn('align-middle text-ink', tight ? 'px-1.5' : 'px-2.5', dense ? 'py-1.5' : 'py-2.5', isProse(c.column.columnDef) ? 'min-w-32 max-w-64 whitespace-normal' : 'whitespace-nowrap', meta?.align === 'right' && 'text-right tabular', meta?.align === 'center' && 'text-center', action && cn(STICKY_CELL, onRowClick && 'group-hover:bg-brand-50'))}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>;
+                    return <td key={c.id} className={cn('align-middle text-ink', tight ? 'px-2' : 'px-3', dense ? 'py-2' : 'py-3.5', isProse(c.column.columnDef) ? 'min-w-32 max-w-64 whitespace-normal' : 'whitespace-nowrap', meta?.align === 'right' && 'text-right tabular', meta?.align === 'center' && 'text-center', action && STICKY_CELL)}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>;
                   })}
                 </tr>
               ))}
@@ -154,13 +157,13 @@ export function DataTable<T>({ data, columns, loading, searchable = true, search
         </div>
         </div>
       )}
-      {!loading && filtered > 0 && footer && <div className="overflow-x-auto border-t border-line bg-surface-alt px-4 py-2.5 text-[13px] font-medium text-ink">{footer}</div>}
+      {!loading && filtered > 0 && footer && <div className="overflow-x-auto border-t border-line bg-surface-alt px-6 py-3 text-sm font-medium text-ink">{footer}</div>}
       {!loading && filtered > pageSize && (
-        <div className="flex items-center justify-between border-t border-line px-4 py-2.5 text-[13px] text-muted">
-          <span>{pageIndex * pageSize + 1}–{Math.min((pageIndex + 1) * pageSize, filtered)} of {filtered}</span>
-          <div className="flex gap-1">
-            <Button variant="secondary" size="sm" aria-label="Previous page" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()} icon={<ChevronLeft className="size-4" />} />
-            <Button variant="secondary" size="sm" aria-label="Next page" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()} icon={<ChevronRight className="size-4" />} />
+        <div className="flex items-center justify-between border-t border-line px-6 py-3 text-sm text-muted">
+          <span className="tabular">{pageIndex * pageSize + 1}–{Math.min((pageIndex + 1) * pageSize, filtered)} of {filtered}</span>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="size-10 px-0" aria-label="Previous page" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()} icon={<ChevronLeft className="size-4" />} />
+            <Button variant="secondary" className="size-10 px-0" aria-label="Next page" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()} icon={<ChevronRight className="size-4" />} />
           </div>
         </div>
       )}

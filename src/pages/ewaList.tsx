@@ -66,13 +66,13 @@ export function EwaHistory({ e }: { e: EwaListRow }) {
   const dot = { ok: "bg-success", warn: "bg-warning", bad: "bg-danger", info: "bg-brand-600" };
   return (
     <div>
-      <p className="mb-1 text-xs font-medium text-muted">History <span className="font-normal">({TZ})</span></p>
-      <ol className="relative space-y-2.5 border-l border-line pl-4 text-sm">
+      <p className="mb-2 text-sm font-medium text-muted">History <span className="font-normal">({TZ})</span></p>
+      <ol className="relative space-y-3 border-l border-line pl-4 text-sm">
         {steps.map((s, i) => (
           <li key={i} className="relative">
-            <span className={cn("absolute -left-[21px] top-1.5 size-2.5 rounded-full ring-2 ring-surface", dot[s.tone ?? "info"])} aria-hidden />
-            <p className="text-ink">{s.title} <span className="text-xs text-muted">· {formatDateTime(s.at)}</span></p>
-            {s.detail && <p className="text-xs text-muted">{s.detail}</p>}
+            <span className={cn("absolute -left-[21px] top-1.5 size-2.5 rounded-full ring-4 ring-surface", dot[s.tone ?? "info"])} aria-hidden />
+            <p className="text-ink">{s.title} <span className="text-muted">· {formatDateTime(s.at)}</span></p>
+            {s.detail && <p className="text-sm text-muted">{s.detail}</p>}
           </li>
         ))}
       </ol>

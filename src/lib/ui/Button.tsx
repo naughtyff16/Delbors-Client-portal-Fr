@@ -5,15 +5,18 @@ import { cn } from './cn';
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'link' | 'success';
 type Size = 'sm' | 'md' | 'lg';
 
+// Disabled buttons use dedicated muted tokens (not opacity), so they read the same on every surface.
+const OFF = 'disabled:bg-surface-alt disabled:text-disabled disabled:shadow-none';
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm disabled:bg-brand-100 disabled:text-brand-700/70 disabled:shadow-none',
-  secondary: 'bg-surface text-ink-2 border border-line-strong hover:bg-surface-alt disabled:text-disabled',
-  ghost: 'text-ink-2 hover:bg-surface-alt disabled:text-disabled',
-  danger: 'bg-danger text-white hover:bg-[#912018] shadow-sm disabled:opacity-50',
-  success: 'bg-success text-white hover:bg-[#116932] shadow-sm disabled:opacity-50',
+  primary: cn('bg-brand-600 text-white hover:bg-brand-700', OFF),
+  // Inset ring instead of a border: no layout cost, and it recedes on any surface.
+  secondary: 'bg-surface text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:bg-surface-alt disabled:text-disabled',
+  ghost: 'text-ink-2 hover:bg-ink/5 disabled:text-disabled disabled:hover:bg-transparent',
+  danger: cn('bg-danger text-white hover:bg-[#912018]', OFF),
+  success: cn('bg-success text-white hover:bg-[#116932]', OFF),
   link: 'text-brand-600 hover:text-brand-700 hover:underline px-0',
 };
-const SIZES: Record<Size, string> = { sm: 'h-8 px-3 text-[13px] gap-1.5', md: 'h-9 px-3.5 text-sm gap-2', lg: 'h-11 px-5 text-[15px] gap-2' };
+const SIZES: Record<Size, string> = { sm: 'h-9 px-3.5 text-sm gap-1.5', md: 'h-11 px-5 text-sm gap-2', lg: 'h-12 px-6 text-base gap-2' };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant; size?: Size; loading?: boolean; icon?: ReactNode;
@@ -28,7 +31,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center rounded-lg font-medium whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed',
+        'inline-flex items-center justify-center rounded-full font-medium whitespace-nowrap transition-[background-color,color,box-shadow,transform] duration-150 ease-out disabled:cursor-not-allowed',
+        variant !== 'link' && 'active:scale-[0.96] disabled:active:scale-100',
         VARIANTS[variant], variant !== 'link' && SIZES[size], className,
       )}
       {...rest}
@@ -42,6 +46,6 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 export function IconButton({ label, className, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
     <button type="button" aria-label={label} title={label}
-      className={cn('inline-flex size-9 items-center justify-center rounded-lg text-ink-2 hover:bg-surface-alt transition-colors', className)} {...rest} />
+      className={cn('inline-flex size-10 items-center justify-center rounded-full text-ink-2 transition-[background-color,transform] duration-150 ease-out hover:bg-ink/5 active:scale-[0.96]', className)} {...rest} />
   );
 }

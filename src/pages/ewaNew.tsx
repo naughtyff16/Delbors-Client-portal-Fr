@@ -41,8 +41,8 @@ function Blocked({ o }: { o: Options }) {
   return (
     <Banner tone={b.code === "HOLD" || b.code === "NOT_ACCREDITED" || b.code === "ACCOUNT" ? "danger" : "warning"} title={b.title}>
       <p>{b.reason}</p>
-      <div className="mt-2 border-t border-current/15 pt-2">
-        <p className="text-xs opacity-80">Who to contact:</p>
+      <div className="mt-3 border-t border-current/15 pt-3">
+        <p className="text-sm font-medium opacity-80">Who to contact:</p>
         {b.code === "HOLD" && <ContactLine contact={o.creditContact} className="mt-0.5" />}
         <ContactLine contact={o.accountExecutive} className="mt-0.5" />
       </div>
@@ -132,8 +132,8 @@ function EwaForm({ o, onClose, onCreated, eqName }: { o: Options; onClose: () =>
       </FormGrid>
 
       {/* Step 3 — equipment: only once both the contract and the pickup branch are chosen. */}
-      <div className="rounded-lg border border-line p-3">
-        <p className="mb-2 text-sm font-medium text-ink">Equipment <span className="text-danger">*</span></p>
+      <div className="rounded-2xl bg-surface-alt p-4">
+        <p className="mb-3 text-sm font-medium text-ink">Equipment <span className="text-danger">*</span></p>
         {!ready ? (
           <p className="text-sm text-muted">Choose the contract and the pickup branch first — the list shows only your contract’s equipment types with the units free at that branch.</p>
         ) : noStock ? (
@@ -169,13 +169,13 @@ function EwaForm({ o, onClose, onCreated, eqName }: { o: Options; onClose: () =>
                     error={l.eq ? err : undefined} disabled={!l.eq}
                     onChange={(e) => setLines(lines.map((x, k) => (k === i ? { ...x, qty: Math.trunc(Number(e.target.value)) } : x)))} />
                   {lines.length > 1 && (
-                    <Button variant="ghost" size="sm" className="sm:mt-6" aria-label={`Remove equipment type ${i + 1}`} icon={<Minus className="size-4" />}
+                    <Button variant="ghost" size="sm" className="sm:mt-8" aria-label={`Remove equipment type ${i + 1}`} icon={<Minus className="size-4" />}
                       onClick={() => setLines(lines.filter((_, k) => k !== i))}>Remove</Button>
                   )}
                 </div>
               );
             })}
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
               <span className={cn(overContract && "font-medium text-danger")}>
                 {plural(total, "unit")} requested · {ct!.entitlement.contractRemaining} can still be requested on {ct!.contractNo}
                 {overContract && " — reduce the quantities"}
@@ -229,19 +229,19 @@ export function EwaDeliveryLog({ euNo, status, delivery }: { euNo: string; statu
   const usable = status === "Active" || status === "Partially Used";
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted">EWA email (full details)</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-muted">EWA email (full details)</p>
         {usable && !!log.length && <Button size="sm" variant="ghost" icon={<Mail className="size-4" />} loading={resend.isPending} onClick={() => resend.mutate(undefined)}>Resend email</Button>}
       </div>
       {log.length ? (
-        <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+        <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
           {log.map((d, i) => (
-            <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+            <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-3">
               <span className="min-w-0">
-                <span className="text-ink">{d.recipient}</span> <span className="text-xs text-muted">· {d.audience}</span>
-                <span className="block truncate text-xs text-muted">{d.to}</span>
+                <span className="text-ink">{d.recipient}</span> <span className="text-muted">· {d.audience}</span>
+                <span className="block truncate text-sm text-muted">{d.to}</span>
               </span>
-              <span className="flex items-center gap-2 text-xs text-muted">
+              <span className="flex items-center gap-2 text-sm text-muted">
                 {formatDateTime(d.at)}{d.resend ? " · resent" : ""}
                 <Badge tone={d.status === "Sent" ? "success" : d.status === "Queued" ? "warning" : "danger"}>{d.status}</Badge>
               </span>

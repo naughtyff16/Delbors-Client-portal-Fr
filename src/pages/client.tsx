@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router";
 import {
+  AlertTriangle,
   Camera,
   Clock,
   Copy,
@@ -37,7 +38,6 @@ import {
   DatePicker,
   FormGrid,
   Input,
-  KpiTile,
   Modal,
   MoneyText,
   PageHeader,
@@ -96,11 +96,11 @@ function Dl({
   cols?: string;
 }) {
   return (
-    <dl className={cn("grid gap-x-6 gap-y-3 text-sm", cols)}>
+    <dl className={cn("grid gap-x-6 gap-y-4 text-sm", cols)}>
       {rows.map(([l, val]) => (
         <div key={l}>
-          <dt className="text-xs text-muted">{l}</dt>
-          <dd className="font-medium text-ink">{val ?? "—"}</dd>
+          <dt className="text-sm text-muted">{l}</dt>
+          <dd className="mt-0.5 font-medium text-ink">{val ?? "—"}</dd>
         </div>
       ))}
     </dl>
@@ -271,7 +271,7 @@ export function ClientEwaPage() {
     e.status === "Active" &&
     new Date(e.validUntil).getTime() - Date.now() < NEAR_EXPIRY_H * 3600_000;
   /** Row action under the status pill: request an extension, see the pending step, cancel before release, or the expiry warning. */
-  const link = "mt-1 block text-xs font-medium hover:underline";
+  const link = "mt-1 block text-sm font-medium hover:underline";
   const extAction = (e: Row) =>
     e.status === "Expired" ? (
       <button
@@ -288,7 +288,7 @@ export function ClientEwaPage() {
       </button>
     ) : e.status === "Extension Pending" ? (
       // Short and wrapping, so the Actions column stays on screen; "IT" keeps its capitals.
-      <span className="mt-1 block max-w-36 whitespace-normal text-xs text-warning" title={e.extension?.stepLabel}>
+      <span className="mt-1 block max-w-36 whitespace-normal text-sm text-warning" title={e.extension?.stepLabel}>
         {/^IT/.test(e.extension?.stepLabel ?? "") ? "Awaiting IT revalidation" : "Awaiting manager approval"}
       </span>
     ) : clientCanCancel(e) ? (
@@ -305,7 +305,7 @@ export function ClientEwaPage() {
         Cancel EWA
       </button>
     ) : soon(e) ? (
-      <span className="mt-1 block text-xs text-warning">Expires soon</span>
+      <span className="mt-1 block text-sm text-warning">Expires soon</span>
     ) : null;
   return (
     <>
@@ -326,7 +326,7 @@ export function ClientEwaPage() {
             {ewaBlocked && (
               <button
                 type="button"
-                className="text-xs font-medium text-danger hover:underline"
+                className="text-sm font-medium text-danger hover:underline"
                 onClick={() => setOpen(true)}
               >
                 {restrictionHint(dash.data!, "ewa")} — why?
@@ -371,7 +371,7 @@ export function ClientEwaPage() {
                   .map((b) => ({ value: b, label: b })),
               ]}
             />
-            <span className="flex items-center gap-1.5 text-sm text-muted">
+            <span className="flex items-center gap-2 text-sm text-muted">
               Created
               <DatePicker
                 aria-label="Created from"
@@ -379,7 +379,7 @@ export function ClientEwaPage() {
                 max={toF || undefined}
                 onChange={setFromF}
                 placeholder="From"
-                className="w-36"
+                className="w-[10.5rem]"
               />
               –
               <DatePicker
@@ -388,12 +388,12 @@ export function ClientEwaPage() {
                 min={fromF || undefined}
                 onChange={setToF}
                 placeholder="To"
-                className="w-36"
+                className="w-[10.5rem]"
               />
               {(fromF || toF) && (
                 <button
                   type="button"
-                  className="text-xs font-medium text-brand-600 hover:underline"
+                  className="text-sm font-medium text-brand-600 hover:underline"
                   onClick={() => {
                     setFromF("");
                     setToF("");
@@ -413,8 +413,8 @@ export function ClientEwaPage() {
             header: "EU no. · branch · contract",
             cell: (c) => (
               <span className="block leading-tight">
-                <span className="font-mono text-[13px] font-semibold text-ink">{c.row.original.euNo}</span>
-                <span className="block text-xs text-muted">
+                <span className="font-mono text-sm font-semibold text-ink">{c.row.original.euNo}</span>
+                <span className="block text-sm text-muted">
                   {c.row.original.branchCode} · <span className="font-mono">{c.row.original.contractNo}</span>
                 </span>
               </span>
@@ -429,10 +429,10 @@ export function ClientEwaPage() {
             cell: (c) => (
               <span className="block leading-tight">
                 {c.row.original.driverName}{" "}
-                <span className="font-mono text-xs text-muted">
+                <span className="font-mono text-sm text-muted">
                   {c.row.original.driverLicenseNo}
                 </span>
-                <span className="block text-xs text-muted">
+                <span className="block text-sm text-muted">
                   {c.row.original.truckPlateNo} · {c.row.original.trucker}
                 </span>
               </span>
@@ -454,13 +454,13 @@ export function ClientEwaPage() {
                     )
                     .join(", ")}
                   {note && (
-                    <span className="ml-1 text-xs font-medium text-warning">
+                    <span className="ml-1 text-sm font-medium text-warning">
                       · {note}
                     </span>
                   )}
                   {/* Used / partly used: the Gate Pass and when the unit left the gate. */}
                   {gp && (
-                    <span className="block text-xs text-muted">
+                    <span className="block text-sm text-muted">
                       <span className="font-mono">{gp.gatePassNo}</span> ·{" "}
                       {formatDateTime(gp.at)}
                       {e.gatePasses.length > 1
@@ -478,7 +478,7 @@ export function ClientEwaPage() {
             cell: (c) => (
               <span className="block leading-tight">
                 {formatDateTime(c.getValue<string>())}
-                <span className="block text-xs text-muted">
+                <span className="block text-sm text-muted">
                   {c.row.original.createdByName}
                 </span>
               </span>
@@ -496,7 +496,7 @@ export function ClientEwaPage() {
               >
                 {formatDateTime(c.getValue<string>())}
                 {c.row.original.extensionCount > 0 && (
-                  <span className="block text-xs font-normal text-muted">
+                  <span className="block text-sm font-normal text-muted">
                     Extended ×{c.row.original.extensionCount}
                   </span>
                 )}
@@ -516,7 +516,7 @@ export function ClientEwaPage() {
                 {extAction(c.row.original)}
                 {c.row.original.status === "Cancelled" && (
                   <span
-                    className="mt-0.5 block max-w-32 truncate text-xs text-muted"
+                    className="mt-0.5 block max-w-32 truncate text-sm text-muted"
                     title={c.row.original.cancelReason}
                   >
                     {c.row.original.cancelReason ?? "No reason recorded"}
@@ -670,11 +670,11 @@ export function ClientEwaPage() {
                   : []),
               ]}
             />
-            <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+            <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
               {view.units.map((u) => (
                 <li
                   key={u.equipmentType}
-                  className="flex justify-between px-3 py-2"
+                  className="flex flex-wrap justify-between gap-x-3 px-4 py-3"
                 >
                   <span>{eqName(u.equipmentType)}</span>
                   <span className="text-muted">
@@ -692,14 +692,14 @@ export function ClientEwaPage() {
             {/* Review 1.1: Gate Pass link once the EWA is used, with the truck OR/CR captured at the gate. */}
             {!!view.gatePasses.length && (
               <div>
-                <p className="mb-1 text-xs font-medium text-muted">
+                <p className="mb-2 text-sm font-medium text-muted">
                   Released at the gate
                 </p>
-                <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
                   {view.gatePasses.map((g) => (
                     <li
                       key={g.gatePassNo}
-                      className="flex flex-wrap justify-between gap-2 px-3 py-2"
+                      className="flex flex-wrap justify-between gap-2 px-4 py-3"
                     >
                       <span>
                         <span className="font-mono">{g.gatePassNo}</span> ·{" "}
@@ -863,14 +863,14 @@ export function ClientEwaPage() {
       >
         {created && (
           <Stack>
-            <div className="rounded-lg border border-brand-100 bg-brand-50 p-4 text-center">
-              <p className="text-xs uppercase tracking-wide text-muted">
+            <div className="rounded-2xl bg-brand-50 p-6 text-center">
+              <p className="text-sm font-medium text-muted">
                 EU number
               </p>
-              <p className="font-mono text-3xl font-bold text-brand-800">
+              <p className="mt-1 font-mono text-4xl font-semibold tracking-tight text-ink">
                 {created.euNo}
               </p>
-              <p className="text-sm text-ink-2">
+              <p className="mt-1.5 text-sm text-ink-2">
                 Valid until{" "}
                 <strong>{formatDateTime(created.validUntil)}</strong>
               </p>
@@ -907,7 +907,7 @@ export function ClientEwaPage() {
               status={created.status}
               delivery={created.delivery}
             />
-            <p className="text-xs text-muted">
+            <p className="text-sm text-muted">
               If your driver cannot reach the gate in time, request an extension
               from the EWA list once it expires — it needs manager approval and
               revalidation by Delbros (BR-06).
@@ -927,14 +927,14 @@ const MAX_PHOTO_MB = 5; // proposed limit per photo (review 1.1) — confirm wit
 function NotifiedList({ list }: { list?: { at: string; channel: string; audience: string; recipient: string; to: string; status: string }[] }) {
   if (!list?.length) return <p className="text-sm text-muted">No notification log for this request (recorded before notification tracking).</p>;
   return (
-    <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+    <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
       {list.map((d, i) => (
-        <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+        <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-4 py-3">
           <span className="min-w-0">
-            <span className="text-ink">{d.recipient}</span> <span className="text-xs text-muted">· {d.audience}</span>
-            <span className="block truncate text-xs text-muted">{d.channel} · {d.to}</span>
+            <span className="text-ink">{d.recipient}</span> <span className="text-sm text-muted">· {d.audience}</span>
+            <span className="block truncate text-sm text-muted">{d.channel} · {d.to}</span>
           </span>
-          <span className="flex items-center gap-2 text-xs text-muted">
+          <span className="flex items-center gap-2 text-sm text-muted">
             {formatDateTime(d.at)} PHT
             <Badge tone={d.status === "Sent" ? "success" : d.status === "Queued" ? "warning" : "danger"}>{d.status}</Badge>
           </span>
@@ -959,7 +959,7 @@ const RESCUE_FILTERS = ["All", "Open", "Requested", "Verified", "Confirmed", "Di
 function PhotoList({ label, files }: { label: string; files?: string[] }) {
   return (
     <div>
-      <p className="mb-1 text-xs text-muted">{label}</p>
+      <p className="mb-1.5 text-sm font-medium text-muted">{label}</p>
       {files?.length ? (
         <ul className="flex flex-wrap gap-1.5">{files.map((f) => <li key={f}><Badge tone="info" dot={false} icon={<Camera className="size-3" aria-hidden />}>{f}</Badge></li>)}</ul>
       ) : <p className="text-sm text-muted">None</p>}
@@ -1070,32 +1070,24 @@ export function ClientRescuePage() {
     );
     const ended = r.status === "Cancelled" || r.status === "Blocked";
     return (
-      <ol className="flex flex-wrap gap-x-1 gap-y-2 text-xs">
+      // Progress reads as a row of bars: filled for every step reached, with the time under the steps that record one.
+      <ol className="grid grid-cols-2 gap-x-3 gap-y-4 text-sm sm:grid-cols-3">
         {RESCUE_STEPS.map((s, i) => {
           const on = !ended ? i <= reached : i === 0;
           return (
-            <li
-              key={s}
-              className={cn(
-                "flex items-center gap-1 rounded-full border px-2 py-1",
-                on
-                  ? "border-brand-300 bg-brand-50 text-brand-800"
-                  : "border-line text-muted",
-              )}
-            >
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  on ? "bg-brand-600" : "bg-line-strong",
-                )}
-              />
-              {s}
-              {on && at[s] ? ` · ${formatDateTime(at[s])}` : ""}
+            <li key={s} className="min-w-0">
+              <span className={cn("block h-1.5 rounded-full", on ? "bg-brand-600" : "bg-line")} aria-hidden />
+              <span className={cn("mt-2 block font-medium", on ? "text-ink" : "text-muted")}>
+                {s}
+                <span className="sr-only">{on ? " (reached)" : " (not yet)"}</span>
+              </span>
+              {on && at[s] && <span className="block text-muted">{formatDateTime(at[s])}</span>}
             </li>
           );
         })}
         {ended && (
-          <li className="flex items-center gap-1 rounded-full border border-danger-line bg-danger-bg/40 px-2 py-1 text-danger">
+          <li className="col-span-full flex items-center gap-2 font-medium text-danger">
+            <AlertTriangle className="size-4 shrink-0" aria-hidden />
             {r.status} · {formatDateTime(r.cancelledAt ?? r.blockedAt)}
           </li>
         )}
@@ -1114,12 +1106,12 @@ export function ClientRescuePage() {
       {w && ws && (
         <div
           className={cn(
-            "mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-4 py-3 text-sm",
+            "mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl px-4 py-3.5 text-sm",
             ws === "healthy"
-              ? "border-line bg-surface"
+              ? "bg-surface shadow-card"
               : ws === "near"
-                ? "border-warning-line bg-warning-bg"
-                : "border-danger-line bg-danger-bg",
+                ? "bg-warning-bg"
+                : "bg-danger-bg",
           )}
         >
           <span className="flex items-center gap-2">
@@ -1128,7 +1120,7 @@ export function ClientRescuePage() {
             <Badge tone={WALLET_STATES[ws].tone}>{WALLET_STATES[ws].label}</Badge>
           </span>
           <span className="text-muted">Minimum {formatPhp(w.minimumBalance)}</span>
-          <span className="min-w-0 flex-1 text-xs text-ink-2">
+          <span className="min-w-0 flex-1 text-sm text-ink-2">
             {/* Timeline 2 review: the warning comes from the same e-wallet rule the API enforces (res.funded_wallet_rule — Finance to confirm). */}
             {gate?.warning ??
               (ws === "healthy" || ws === "near"
@@ -1153,16 +1145,16 @@ export function ClientRescuePage() {
               dispatcher will call {done.sceneContactName} on {done.sceneContactPhone} to confirm the crew and ETA. You can follow the status
               below or open the request for its timeline.
             </Banner>
-            <div className="rounded-lg border border-brand-100 bg-brand-50 p-4 text-center">
-              <p className="text-xs uppercase tracking-wide text-muted">Reference</p>
-              <p className="font-mono text-2xl font-bold text-brand-800">{done.rescueNo}</p>
-              <p className="text-sm text-ink-2">
+            <div className="rounded-2xl bg-brand-50 p-6 text-center">
+              <p className="text-sm font-medium text-muted">Reference</p>
+              <p className="mt-1 font-mono text-4xl font-semibold tracking-tight text-ink">{done.rescueNo}</p>
+              <p className="mt-1.5 text-sm text-ink-2">
                 {done.chassisNo} · {done.problemType}
                 {done.problemDetail ? ` — ${done.problemDetail}` : ""} · requested {formatDateTime(done.requestedAt)} PHT
               </p>
             </div>
             <div>
-              <p className="mb-1 text-xs font-medium text-muted">Notified</p>
+              <p className="mb-2 text-sm font-medium text-muted">Notified</p>
               <NotifiedList list={done.notified} />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1259,9 +1251,9 @@ export function ClientRescuePage() {
                   hint="Helps the dispatcher plan the crew and equipment"
                 />
               </FormGrid>
-              <div className="flex items-end gap-2">
+              <div className="flex flex-wrap items-end gap-3">
                 <Input
-                  wrapperClassName="flex-1"
+                  wrapperClassName="min-w-56 flex-1"
                   label="Current location"
                   required
                   error={need(v.locationText)}
@@ -1272,7 +1264,7 @@ export function ClientRescuePage() {
                 />
                 <Button
                   variant="secondary"
-                  className={cn(need(v.locationText) && "mb-[22px]")}
+                  className={cn(need(v.locationText) && "mb-[26px]")}
                   icon={<LocateFixed className="size-4" />}
                   onClick={() =>
                     navigator.geolocation?.getCurrentPosition((p) =>
@@ -1326,14 +1318,14 @@ export function ClientRescuePage() {
                 />
               </FormGrid>
               <div>
-                <label className="flex cursor-pointer flex-wrap items-center gap-3 rounded-lg border-2 border-dashed border-line-strong p-4 text-sm text-muted hover:border-brand-300">
+                <label className="flex cursor-pointer flex-wrap items-center gap-3 rounded-2xl border border-dashed border-line-strong bg-surface-alt p-5 text-sm text-muted transition-[border-color,box-shadow] duration-150 hover:border-brand-600 focus-within:border-brand-600 focus-within:ring-4 focus-within:ring-brand-600/12">
                   <Camera className="size-5" />
                   <span className="min-w-0 flex-1">
                     Supporting photos (optional) — damaged tire, unit, location.
                     Up to {MAX_PHOTOS} images (JPG, PNG or HEIC, max{" "}
                     {MAX_PHOTO_MB} MB each).
                   </span>
-                  <span className="inline-flex h-8 items-center rounded-lg border border-line-strong bg-surface px-3 text-[13px] font-medium text-ink-2">
+                  <span className="inline-flex h-9 items-center rounded-full bg-surface px-4 text-sm font-medium text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)]">
                     Add photos
                   </span>
                   <input
@@ -1369,7 +1361,7 @@ export function ClientRescuePage() {
                   />
                 </label>
                 {photoErr && (
-                  <p className="mt-1 text-xs text-danger">{photoErr}</p>
+                  <p role="alert" className="mt-1.5 text-sm text-danger">{photoErr}</p>
                 )}
                 {!!v.photos.length && (
                   <ul className="mt-2 flex flex-wrap gap-2">
@@ -1380,7 +1372,7 @@ export function ClientRescuePage() {
                           <button
                             type="button"
                             aria-label={`Remove ${p}`}
-                            className="ml-1"
+                            className="relative ml-0.5 before:absolute before:-inset-2"
                             onClick={() =>
                               setV((x) => ({
                                 ...x,
@@ -1388,7 +1380,7 @@ export function ClientRescuePage() {
                               }))
                             }
                           >
-                            <X className="size-3" />
+                            <X className="size-3.5" />
                           </button>
                         </Badge>
                       </li>
@@ -1396,7 +1388,7 @@ export function ClientRescuePage() {
                   </ul>
                 )}
               </div>
-              <div className="flex flex-wrap items-start justify-between gap-4 border-t border-line pt-4">
+              <div className="flex flex-wrap items-start justify-between gap-4 border-t border-line pt-5">
                 <Switch
                   label={
                     <span className="flex items-center gap-1.5">
@@ -1415,7 +1407,7 @@ export function ClientRescuePage() {
                   >
                     Submit request
                   </Button>
-                  <details className="max-w-md text-right text-xs text-muted">
+                  <details className="max-w-md text-right text-sm text-muted">
                     <summary className="cursor-pointer">
                       Charges: travel + tires + parts + 10% service fee, plus 12% VAT (BR-11)
                     </summary>
@@ -1437,8 +1429,8 @@ export function ClientRescuePage() {
           </Card>
         )
       )}
-      <h2 className="mb-1 font-semibold text-ink">My rescue requests</h2>
-      <p className="mb-2 text-xs text-muted">
+      <h2 className="mb-1 mt-8 text-lg font-semibold tracking-tight text-ink">My rescue requests</h2>
+      <p className="mb-3 max-w-[85ch] text-sm text-muted">
         Requested → Verified (Credit & Collection checked eligibility) → Confirmed (Delbros approved the rescue) → Dispatched (crew on the way, with ETA) → In
         progress → Completed. You get a notice at Confirmed, Dispatched and Completed. You can cancel while a request is Requested; after that, call the
         dispatcher. Times are Philippine time (PHT).
@@ -1486,10 +1478,10 @@ export function ClientRescuePage() {
                     Urgent
                   </Badge>
                 )}
-                <span className="block max-w-56 truncate text-xs text-muted" title={c.row.original.locationText}>
+                <span className="block max-w-56 truncate text-sm text-muted" title={c.row.original.locationText}>
                   {c.row.original.locationText}
                 </span>
-                <span className="block text-xs text-muted">
+                <span className="block text-sm text-muted">
                   {c.row.original.sceneContactName} · {c.row.original.sceneContactPhone}
                 </span>
               </span>
@@ -1504,11 +1496,11 @@ export function ClientRescuePage() {
                 <span className="block leading-tight">
                   {c.row.original.problemType}
                   {c.row.original.problemDetail && (
-                    <span className="block max-w-40 truncate text-xs text-muted">{c.row.original.problemDetail}</span>
+                    <span className="block max-w-40 truncate text-sm text-muted">{c.row.original.problemDetail}</span>
                   )}
                 </span>
               ) : (
-                <span className="text-xs text-muted" title="Recorded before the problem type was required">
+                <span className="text-sm text-muted" title="Recorded before the problem type was required">
                   Not recorded
                 </span>
               ),
@@ -1536,7 +1528,7 @@ export function ClientRescuePage() {
               <span className="block leading-tight">
                 <PortalStatus domain="rescue" value={c.getValue<string>()} />
                 {(c.row.original.status === "Dispatched" || c.row.original.status === "In Progress") && c.row.original.eta && (
-                  <span className="mt-0.5 block text-xs text-muted">ETA {formatDateTime(c.row.original.eta)}</span>
+                  <span className="mt-0.5 block text-sm text-muted">ETA {formatDateTime(c.row.original.eta)}</span>
                 )}
               </span>
             ),
@@ -1689,14 +1681,14 @@ export function ClientRescuePage() {
                     ] as [string, string, number][]
                   ).map(([l, d, a]) => (
                     <tr key={l} className="border-b border-line">
-                      <td className="py-1.5 text-muted">{l}</td>
-                      <td className="text-xs text-muted">{d}</td>
+                      <td className="py-2.5 text-muted">{l}</td>
+                      <td className="text-sm text-muted">{d}</td>
                       <td className="text-right">{formatPhp(a)}</td>
                     </tr>
                   ))}
                   <tr className="font-semibold">
-                    <td className="py-1.5">Total charge</td>
-                    <td className="text-xs font-normal text-muted">
+                    <td className="py-2.5">Total charge</td>
+                    <td className="text-sm font-normal text-muted">
                       {view.debitMemoNo
                         ? `Debit memo ${view.debitMemoNo} · deducted from the e-wallet`
                         : ""}
@@ -1710,16 +1702,16 @@ export function ClientRescuePage() {
             )}
             {/* Timeline 2 review (DBL-RES-006 / 008): dispatch and completion evidence — crew, vehicle, ETA, before / after photos and the acknowledgment. */}
             {(view.status === "Completed" || view.beforePhotos?.length || view.afterPhotos?.length) && (
-              <div className="rounded-lg border border-line p-3">
-                <p className="mb-2 text-xs font-medium text-muted">Completion evidence</p>
-                <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl bg-surface-alt p-4">
+                <p className="mb-3 text-sm font-medium text-muted">Completion evidence</p>
+                <div className="grid gap-4 sm:grid-cols-2">
                   <PhotoList label="Before the repair" files={view.beforePhotos} />
                   <PhotoList label="After the repair" files={view.afterPhotos} />
                 </div>
-                <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-                  <div><dt className="text-xs text-muted">On-site assessment</dt><dd>{view.onsiteAssessment ?? "—"}</dd></div>
+                <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                  <div><dt className="text-sm text-muted">On-site assessment</dt><dd>{view.onsiteAssessment ?? "—"}</dd></div>
                   <div>
-                    <dt className="text-xs text-muted">Client acknowledgment</dt>
+                    <dt className="text-sm text-muted">Client acknowledgment</dt>
                     <dd>{view.clientAckName ? <>Signed by <strong>{view.clientAckName}</strong>{view.acknowledgedAt ? ` · ${formatDateTime(view.acknowledgedAt)} PHT` : ""}</> : <span className="text-warning">Not recorded</span>}</dd>
                   </div>
                 </dl>
@@ -1727,13 +1719,13 @@ export function ClientRescuePage() {
             )}
             <PhotoList label="Photos sent with the request" files={view.photos} />
             <div>
-              <p className="mb-1 text-xs font-medium text-muted">Status notices sent to you</p>
+              <p className="mb-2 text-sm font-medium text-muted">Status notices sent to you</p>
               {view.clientNotices?.length ? (
-                <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
                   {view.clientNotices.map((n, i) => (
-                    <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2">
-                      <span className="min-w-0"><span className="text-ink">{n.subject}</span><span className="block text-xs text-muted">{n.channel} · {n.to}</span></span>
-                      <span className="flex items-center gap-2 text-xs text-muted">
+                    <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-4 py-3">
+                      <span className="min-w-0"><span className="text-ink">{n.subject}</span><span className="block text-sm text-muted">{n.channel} · {n.to}</span></span>
+                      <span className="flex items-center gap-2 text-sm text-muted">
                         {formatDateTime(n.at)} PHT
                         <Badge tone={n.status === "Sent" ? "success" : n.status === "Queued" ? "warning" : "danger"}>{n.status === "Queued" ? "Queued for sending" : n.status}</Badge>
                       </span>
@@ -1745,7 +1737,7 @@ export function ClientRescuePage() {
               )}
             </div>
             <div>
-              <p className="mb-1 text-xs font-medium text-muted">Notified when the request was made</p>
+              <p className="mb-2 text-sm font-medium text-muted">Notified when the request was made</p>
               <NotifiedList list={view.notified} />
             </div>
             {view.status === "Cancelled" && (
@@ -1759,7 +1751,7 @@ export function ClientRescuePage() {
               </Banner>
             )}
             {view.status === "Requested" && (
-              <p className="text-xs text-muted">
+              <p className="text-sm text-muted">
                 You can cancel while the request is still Requested. Once
                 Delbros has verified it, call the dispatcher to cancel.
               </p>
@@ -2169,32 +2161,46 @@ export function ClientInvoicesPage() {
         soa.data && <SoaPrint s={soa.data} />
       )}
       {soa.data && (
-        // Total due is its own summary tile (spanning both rows, content centred vertically); the six aging buckets read in order in a 3 × 2 grid beside it.
-        <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="col-span-2 grid sm:col-span-1 sm:row-span-2 [&>*]:justify-center">
-            <KpiTile
-              label="Total due"
-              value={formatPhp(soa.data.aging.total)}
-              tone={soa.data.aging.total > 0 ? "warning" : "default"}
-              hint="Sum of all aging buckets"
-            />
+        // One card: the total owns the left, and the six aging buckets read in order beside it (past-due buckets turn red).
+        <Card className="mb-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center">
+          <div>
+            <h2 className="text-sm font-medium text-muted">Total due</h2>
+            <p className="mt-1 whitespace-nowrap text-[clamp(28px,5vw,40px)] font-semibold leading-tight tracking-tight tabular text-ink">
+              {formatPhp(soa.data.aging.total)}
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              {soa.data.aging.total - soa.data.aging.current > 0 ? (
+                <span className="font-medium text-danger">{formatPhp(soa.data.aging.total - soa.data.aging.current)} past due</span>
+              ) : (
+                "Nothing past due"
+              )}
+            </p>
           </div>
-          {[
-            ["Current", soa.data.aging.current],
-            ["1–30 days", soa.data.aging.d1_30],
-            ["31–60 days", soa.data.aging.d31_60],
-            ["61–90 days", soa.data.aging.d61_90],
-            ["91–180 days", soa.data.aging.d91_180],
-            ["Over 180 days", soa.data.aging.d180],
-          ].map(([l, v]) => (
-            <KpiTile
-              key={l as string}
-              label={l}
-              value={formatPhp(v as number)}
-              tone={(v as number) > 0 && l !== "Current" ? "danger" : "default"}
-            />
-          ))}
-        </div>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 lg:border-l lg:border-line lg:pl-8">
+            {(
+              [
+                ["Current", soa.data.aging.current],
+                ["1–30 days", soa.data.aging.d1_30],
+                ["31–60 days", soa.data.aging.d31_60],
+                ["61–90 days", soa.data.aging.d61_90],
+                ["91–180 days", soa.data.aging.d91_180],
+                ["Over 180 days", soa.data.aging.d180],
+              ] as [string, number][]
+            ).map(([l, v]) => (
+              <div key={l} className="min-w-0">
+                <dt className="text-sm text-muted">{l}</dt>
+                <dd
+                  className={cn(
+                    "mt-0.5 whitespace-nowrap text-lg font-semibold tabular",
+                    v > 0 && l !== "Current" ? "text-danger" : "text-ink",
+                  )}
+                >
+                  {formatPhp(v)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
       )}
       {invs.data && <BillingCoverage invs={invs.data} cycle={dash.data?.client.billingCycle} week={dash.data?.billing.weekly.label} />}
       <DataTable<Row>
@@ -2213,7 +2219,7 @@ export function ClientInvoicesPage() {
         initialSort={[{ id: "invoiceDate", desc: true }]}
         toolbar={
           <>
-            <h2 className="mr-2 font-semibold text-ink">Invoices</h2>
+            <h2 className="mr-2 text-lg font-semibold tracking-tight text-ink">Invoices</h2>
             <Segmented
               value={pay}
               onChange={setPay}
@@ -2224,11 +2230,11 @@ export function ClientInvoicesPage() {
             />
             <Select aria-label="Bill type" value={billF} onChange={(e) => setBillF(e.target.value)}
               options={[{ value: "", label: "All bill types" }, ...[...new Set((invs.data ?? []).map(billLabel))].sort().map((b) => ({ value: b, label: b }))]} />
-            <span className="flex items-center gap-1.5 whitespace-nowrap text-sm text-muted">
+            <span className="flex items-center gap-2 whitespace-nowrap text-sm text-muted">
               Dated
-              <DatePicker aria-label="Invoice date from" value={invFrom} max={invTo || undefined} onChange={setInvFrom} placeholder="From" className="w-36" />–
-              <DatePicker aria-label="Invoice date to" value={invTo} min={invFrom || undefined} onChange={setInvTo} placeholder="To" className="w-36" />
-              {(invFrom || invTo) && <button type="button" className="text-xs font-medium text-brand-600 hover:underline" onClick={() => { setInvFrom(""); setInvTo(""); }}>Clear</button>}
+              <DatePicker aria-label="Invoice date from" value={invFrom} max={invTo || undefined} onChange={setInvFrom} placeholder="From" className="w-[10.5rem]" />–
+              <DatePicker aria-label="Invoice date to" value={invTo} min={invFrom || undefined} onChange={setInvTo} placeholder="To" className="w-[10.5rem]" />
+              {(invFrom || invTo) && <button type="button" className="text-sm font-medium text-brand-600 hover:underline" onClick={() => { setInvFrom(""); setInvTo(""); }}>Clear</button>}
             </span>
           </>
         }
@@ -2266,8 +2272,8 @@ export function ClientInvoicesPage() {
                 // Stacked (type / period / contract · units) so the table still fits without sideways scrolling.
                 <span className="block leading-tight">
                   <Badge tone={r.isLease ? "info" : "neutral"} dot={false}>{billLabel(r)}</Badge>
-                  <span className="mt-0.5 block whitespace-nowrap text-[13px]">{r.isLease ? periodLabel(r) : formatDate(r.periodStart)}</span>
-                  <span className="block whitespace-nowrap text-xs text-muted">
+                  <span className="mt-0.5 block whitespace-nowrap text-sm">{r.isLease ? periodLabel(r) : formatDate(r.periodStart)}</span>
+                  <span className="block whitespace-nowrap text-sm text-muted">
                     {r.contractNo && <span className="font-mono">{r.contractNo}</span>}
                     {u.length ? ` · ${u.length <= 2 ? u.join(", ") : `${u.length} units`}` : ""}
                   </span>
@@ -2283,7 +2289,7 @@ export function ClientInvoicesPage() {
             cell: (c) => (
               <span className="block leading-tight">
                 {cancelled(c.row.original) ? <s>{formatPhp(c.getValue<number>())}</s> : formatPhp(c.getValue<number>())}
-                <span className="block text-xs text-muted">
+                <span className="block text-sm text-muted">
                   {formatPhp(c.row.original.subtotal)} + {formatPhp(c.row.original.vat)}
                 </span>
               </span>
@@ -2312,7 +2318,7 @@ export function ClientInvoicesPage() {
               if (cancelled(r) || r.balance <= 0) return <span className="text-muted">—</span>;
               if (r.daysOverdue > 0) return <span className="font-medium text-danger">{r.daysOverdue}</span>;
               const n = daysFromToday(r.dueDate);
-              return <span className="text-xs text-muted">{n === 0 ? "due today" : `due in ${n} d`}</span>;
+              return <span className="text-sm text-muted">{n === 0 ? "due today" : `due in ${n} d`}</span>;
             },
           },
           {
@@ -2322,7 +2328,7 @@ export function ClientInvoicesPage() {
               <span className="block leading-tight">
                 <PortalStatus domain="payment" value={c.getValue<string>()} />
                 {openItem(c.row.original) && (
-                  <span className="mt-0.5 block text-xs text-warning">{openItem(c.row.original)}</span>
+                  <span className="mt-0.5 block text-sm text-warning">{openItem(c.row.original)}</span>
                 )}
               </span>
             ),
@@ -2403,11 +2409,11 @@ export function ClientInvoicesPage() {
                 {inv.cancelReason}
               </Banner>
             )}
-            <p className="rounded-lg bg-surface-alt px-3 py-2 text-sm text-ink-2">{billingBasis(inv)}</p>
+            <p className="rounded-xl bg-surface-alt px-4 py-3 text-sm text-ink-2">{billingBasis(inv)}</p>
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-line text-left text-xs text-muted">
-                  <th className="py-1.5">Description · unit</th>
+                <tr className="border-b border-line text-left text-sm text-muted">
+                  <th className="py-2.5">Description · unit</th>
                   <th>From – to</th>
                   <th className="text-right">Days</th>
                   <th className="text-right">Rate</th>
@@ -2417,17 +2423,17 @@ export function ClientInvoicesPage() {
               <tbody>
                 {inv.lines.map((l) => (
                   <tr key={l.id} className="border-b border-line last:border-0">
-                    <td className="py-1.5">
+                    <td className="py-2.5">
                       {l.description}
                       {l.chassisNo && (
-                        <span className="ml-1 font-mono text-xs text-muted">
+                        <span className="ml-1 font-mono text-sm text-muted">
                           {l.chassisNo}
                         </span>
                       )}
                       {/* Timeline 2 review: lease lines come from the unit's hire (Gate Out → Gate In) inside the billed week. */}
-                      {l.lineType === "Lease" && l.reason && <span className="block text-xs text-muted">{l.reason}</span>}
+                      {l.lineType === "Lease" && l.reason && <span className="block text-sm text-muted">{l.reason}</span>}
                     </td>
-                    <td className="whitespace-nowrap text-xs text-muted">
+                    <td className="whitespace-nowrap text-sm text-muted">
                       {l.from ? `${formatDate(l.from)}${l.to && l.to !== l.from ? ` – ${formatDate(l.to)}` : ""}` : "—"}
                     </td>
                     <td className="text-right tabular">{l.days ?? ""}</td>
@@ -2470,14 +2476,14 @@ export function ClientInvoicesPage() {
             {/* Payments (Official / Provisional), credit memos, proof sent and disputes on this invoice. */}
             {!!inv.payments.length && (
               <div>
-                <p className="mb-1 text-xs font-medium text-muted">Payments</p>
-                <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                <p className="mb-2 text-sm font-medium text-muted">Payments</p>
+                <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
                   {inv.payments.map((x) => (
-                    <li key={x.receiptNo} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                    <li key={x.receiptNo} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                       <span>
                         <span className="font-mono">{x.receiptNo}</span>{" "}
                         <Badge tone={x.series === "Official receipt" ? "success" : "warning"} dot={false}>{x.series}</Badge>
-                        <span className="block text-xs text-muted">
+                        <span className="block text-sm text-muted">
                           {formatDate(x.date)} · {x.method}{x.bank ? ` · ${x.bank}` : ""}{x.checkNo ? ` · check ${x.checkNo}` : ""}{x.fromPr ? ` · from ${x.fromPr}` : ""}
                           {!x.counted ? ` · ${x.status === "Provisional" ? "awaiting clearance — not yet deducted" : x.status.toLowerCase()}` : ""}
                         </span>
@@ -2490,11 +2496,11 @@ export function ClientInvoicesPage() {
             )}
             {!!inv.credits.length && (
               <div>
-                <p className="mb-1 text-xs font-medium text-muted">Credit memos applied</p>
-                <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                <p className="mb-2 text-sm font-medium text-muted">Credit memos applied</p>
+                <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
                   {inv.credits.map((m) => (
-                    <li key={m.memoNo} className="flex flex-wrap justify-between gap-2 px-3 py-2">
-                      <span><span className="font-mono">{m.memoNo}</span> <span className="text-xs text-muted">· {m.category ?? "Credit"} · {formatDate(m.appliedAt)}</span><span className="block text-xs text-muted">{m.reason}</span></span>
+                    <li key={m.memoNo} className="flex flex-wrap justify-between gap-2 px-4 py-3">
+                      <span><span className="font-mono">{m.memoNo}</span> <span className="text-sm text-muted">· {m.category ?? "Credit"} · {formatDate(m.appliedAt)}</span><span className="block text-sm text-muted">{m.reason}</span></span>
                       <span className="tabular">− {formatPhp(m.amount)}</span>
                     </li>
                   ))}
@@ -2503,17 +2509,17 @@ export function ClientInvoicesPage() {
             )}
             {(!!inv.advices.length || !!inv.disputes.length) && (
               <div>
-                <p className="mb-1 text-xs font-medium text-muted">Sent by you</p>
-                <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                <p className="mb-2 text-sm font-medium text-muted">Sent by you</p>
+                <ul className="divide-y divide-line rounded-2xl bg-surface-alt text-sm">
                   {inv.advices.map((a) => (
-                    <li key={a.id} className="flex flex-wrap justify-between gap-2 px-3 py-2">
-                      <span><span className="font-mono">{a.id}</span> · proof of payment {formatPhp(a.amount)}<span className="block text-xs text-muted">{formatDate(a.paidOn)} · {a.method} · ref {a.reference} · {a.proofFileName}</span></span>
+                    <li key={a.id} className="flex flex-wrap justify-between gap-2 px-4 py-3">
+                      <span><span className="font-mono">{a.id}</span> · proof of payment {formatPhp(a.amount)}<span className="block text-sm text-muted">{formatDate(a.paidOn)} · {a.method} · ref {a.reference} · {a.proofFileName}</span></span>
                       <Badge tone={a.status === "Verified" ? "success" : a.status === "Rejected" ? "danger" : "warning"}>{a.status === "Submitted" ? "Accounting checking" : a.status}</Badge>
                     </li>
                   ))}
                   {inv.disputes.map((d) => (
-                    <li key={d.id} className="flex flex-wrap justify-between gap-2 px-3 py-2">
-                      <span><span className="font-mono">{d.id}</span> · dispute: {d.reason}<span className="block text-xs text-muted">{d.details}</span></span>
+                    <li key={d.id} className="flex flex-wrap justify-between gap-2 px-4 py-3">
+                      <span><span className="font-mono">{d.id}</span> · dispute: {d.reason}<span className="block text-sm text-muted">{d.details}</span></span>
                       <Badge tone={d.status === "Resolved" ? "success" : d.status === "Rejected" ? "danger" : "warning"}>{d.status}</Badge>
                     </li>
                   ))}
@@ -2526,30 +2532,32 @@ export function ClientInvoicesPage() {
       <PaymentAdviceDialog inv={advice} onClose={() => setAdvice(null)} />
       <DisputeDialog inv={dispute} onClose={() => setDispute(null)} />
       {soa.data && (
-        <Card className="mt-5">
+        <Card padded={false} className="mt-5 overflow-hidden">
           <CardHeader
+            className="mb-1 px-6 pt-6"
             title={`Statement of account ${soa.data.soaNo}`}
             description={`${soa.data.client.clientName} (${soa.data.client.clientCode}) · ${soa.data.client.billingCycle} billing · as of ${formatDateTime(soa.data.asOf)} PHT${closing != null ? ` · closing balance ${formatPhp(closing)}` : ""}`}
           />
           {/* Statement period: From / To with an opening balance ("Balance brought forward"). */}
-          <div className="mb-3">
-            <span className="flex flex-wrap items-center gap-1.5 text-sm text-muted">
+          <div className="mb-3 px-6">
+            <span className="flex flex-wrap items-center gap-2 text-sm text-muted">
               Period
-              <span className="w-40 shrink-0"><DatePicker aria-label="Statement from" value={soaFrom} max={soaTo || undefined} onChange={setSoaFrom} placeholder="From" className="w-36" /></span>–
-              <span className="w-40 shrink-0"><DatePicker aria-label="Statement to" value={soaTo} min={soaFrom || undefined} onChange={setSoaTo} placeholder="To" className="w-36" /></span>
+              <span className="w-[10.5rem] shrink-0"><DatePicker aria-label="Statement from" value={soaFrom} max={soaTo || undefined} onChange={setSoaFrom} placeholder="From" className="w-[10.5rem]" /></span>–
+              <span className="w-[10.5rem] shrink-0"><DatePicker aria-label="Statement to" value={soaTo} min={soaFrom || undefined} onChange={setSoaTo} placeholder="To" className="w-[10.5rem]" /></span>
               {(soaFrom || soaTo) && (
-                <button type="button" className="text-xs font-medium text-brand-600 hover:underline" onClick={() => { setSoaFrom(""); setSoaTo(""); }}>
+                <button type="button" className="text-sm font-medium text-brand-600 hover:underline" onClick={() => { setSoaFrom(""); setSoaTo(""); }}>
                   All dates
                 </button>
               )}
             </span>
           </div>
           {soaView && (soaFrom || soaTo) && (
-            <p className="mb-2 text-sm text-ink-2">
+            <p className="mb-2 px-6 text-sm text-ink-2">
               {soaFrom ? formatDate(soaFrom) : "Start"} – {soaTo ? formatDate(soaTo) : "today"}: opening {formatPhp(soaView.opening)} + charges {formatPhp(soaView.debits)} − credits {formatPhp(soaView.credits)} = closing <strong>{formatPhp(soaView.closing)}</strong>
             </p>
           )}
           <DataTable
+            frame={false}
             data={soaView?.rows ?? soa.data.lines}
             searchable={false}
             pageSize={10}
@@ -2625,8 +2633,9 @@ export function ClientInvoicesPage() {
               },
             ]}
           />
+          <div className="border-t border-line px-6 pb-6">
           {!!awaitingClearance.length && (
-            <p className="mt-3 rounded-lg border border-warning-line bg-warning-bg px-3 py-2 text-sm">
+            <p className="mt-4 rounded-xl bg-warning-bg px-4 py-3 text-sm">
               Awaiting clearance (not yet on the statement):{" "}
               {awaitingClearance.map((x) => `${x.receiptNo} ${formatPhp(x.amount)} for ${x.invoiceNo}`).join("; ")}.
             </p>
@@ -2635,23 +2644,24 @@ export function ClientInvoicesPage() {
           {(() => {
             const n = soa.data.notOnStatement;
             return (
-              <div className="mt-3 rounded-lg border border-line bg-surface-alt/50 px-3 py-2 text-sm">
+              <div className="mt-4 rounded-2xl bg-surface-alt px-4 py-3.5 text-sm">
                 <p className="font-medium text-ink">Not on this statement</p>
-                <ul className="mt-1 space-y-0.5 text-xs text-ink-2">
+                <ul className="mt-1.5 space-y-1 text-sm text-ink-2">
                   {n.unsettledDebitMemos.length ? n.unsettledDebitMemos.map((m) => (
                     <li key={m.memoNo}><span className="font-mono">{m.memoNo}</span> {formatPhp(m.amount)} — posted {formatDate(m.createdAt)}, not yet settled ({m.reason}). It is added to an invoice or deducted from your e-wallet; it is counted in the cash bond refund until then.</li>
                   )) : <li>No posted debit memos waiting to be settled.</li>}
                   <li>E-wallet: balance {formatPhp(n.ewalletBalance)}; deductions so far {formatPhp(n.ewalletDeductions)} (rescue and debit memos settled from the wallet). These are in the <Link to="/client/ewallet" className="text-brand-600 hover:underline">E-wallet ledger</Link>, not on this statement — except a debit memo applied to an invoice, which shows here.</li>
                 </ul>
-                <p className="mt-1 text-[11px] text-muted">Proposed scope — Finance to confirm whether e-wallet deductions and unsettled debit memos should also appear as statement rows.</p>
+                <p className="mt-1.5 text-sm text-muted">Proposed scope — Finance to confirm whether e-wallet deductions and unsettled debit memos should also appear as statement rows.</p>
               </div>
             );
           })()}
-          <p className="mt-3 text-xs text-muted">
+          <p className="mt-4 max-w-[85ch] text-sm text-muted">
             Receipts: a <strong>Provisional Receipt (PR-)</strong> is issued when a payment (for example a check) is received; it becomes an{" "}
             <strong>Official Receipt (OR-)</strong> when Treasury clears the funds, and only then reduces your balance. Credit memos (for example
             withholding tax, or a late-encoding correction under BR-05) appear as Credit Memo rows. Times are Philippine time (PHT).
           </p>
+          </div>
         </Card>
       )}
     </>

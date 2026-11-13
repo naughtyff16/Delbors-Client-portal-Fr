@@ -11,10 +11,10 @@ export function Tabs({ items, value, onChange, className }: { items: TabItem[]; 
         const active = t.id === value;
         return (
           <button key={t.id} role="tab" aria-selected={active} onClick={() => onChange(t.id)}
-            className={cn('inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors',
-              active ? 'border-brand-600 text-brand-700' : 'border-transparent text-muted hover:text-ink')}>
+            className={cn('inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors duration-150',
+              active ? 'border-brand-600 text-ink' : 'border-transparent text-muted hover:text-ink')}>
             {t.label}
-            {t.count != null && <span className={cn('rounded-full px-1.5 text-xs', active ? 'bg-brand-100 text-brand-700' : 'bg-surface-alt text-muted')}>{t.count}</span>}
+            {t.count != null && <span className={cn('rounded-md px-1.5 text-sm tabular', active ? 'bg-brand-50 text-brand-700' : 'bg-surface-alt text-muted')}>{t.count}</span>}
           </button>
         );
       })}
@@ -22,12 +22,13 @@ export function Tabs({ items, value, onChange, className }: { items: TabItem[]; 
   );
 }
 
+/** Pill switch between views of the same list. The weight never changes between states, so labels do not shift. */
 export function Segmented<T extends string>({ options, value, onChange }: { options: { value: T; label: ReactNode }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <div className="inline-flex h-9 shrink-0 items-center rounded-lg border border-line-strong bg-surface-alt p-0.5">
+    <div className="inline-flex h-11 max-w-full shrink-0 items-center overflow-x-auto rounded-full bg-surface-alt p-1 shadow-[inset_0_0_0_1px_var(--color-line)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)} aria-pressed={o.value === value}
-          className={cn('h-full whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-colors', o.value === value ? 'bg-surface text-brand-700 shadow-sm' : 'text-muted hover:text-ink')}>
+          className={cn('h-full shrink-0 whitespace-nowrap rounded-full px-3.5 text-sm font-medium transition-[background-color,color,box-shadow] duration-150', o.value === value ? 'bg-brand-600 text-white shadow-sm' : 'text-ink-2 hover:text-ink')}>
           {o.label}
         </button>
       ))}

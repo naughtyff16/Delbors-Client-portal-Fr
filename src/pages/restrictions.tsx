@@ -21,8 +21,8 @@ function Contacts({ list }: { list: (PortalContact | null | undefined)[] }) {
   const shown = list.filter(Boolean) as PortalContact[];
   if (!shown.length) return null;
   return (
-    <div className="mt-2 border-t border-current/15 pt-2">
-      <p className="text-xs opacity-80">Who to contact:</p>
+    <div className="mt-3 border-t border-current/15 pt-3">
+      <p className="text-sm font-medium opacity-80">Who to contact:</p>
       {shown.map((c) => <ContactLine key={c.role} contact={c} className="mt-0.5" />)}
     </div>
   );
@@ -68,7 +68,7 @@ export function AccountRestriction({ dash, scope, className }: { dash?: Dash; sc
   if (r === 'hold') {
     const title = scope === 'ewa' ? 'New EWAs are blocked — your account is on hold' : scope === 'rescue' ? 'Rescue requests are blocked — your account is on hold' : 'Your account is on hold';
     return (
-      <Banner tone="danger" className={className} title={title} actions={<Link to="/client/invoices"><Button size="sm" variant="danger">View balance</Button></Link>}>
+      <Banner tone="danger" className={className} title={title} actions={<Link to="/client/invoices"><Button size="sm" variant="danger" tabIndex={-1}>View balance</Button></Link>}>
         <HoldDetails d={d} />
       </Banner>
     );
@@ -88,9 +88,9 @@ export function AccountRestriction({ dash, scope, className }: { dash?: Dash; sc
   const gate = scope === 'ewa' ? d.gates.ewa : d.gates.rescue;
   if (r === 'wallet') {
     return (
-      <Banner tone="warning" className={className} title="Rescue requests need a funded e-wallet" actions={<Link to="/client/ewallet"><Button size="sm">Request a top-up</Button></Link>}>
+      <Banner tone="warning" className={className} title="Rescue requests need a funded e-wallet" actions={<Link to="/client/ewallet"><Button size="sm" tabIndex={-1}>Request a top-up</Button></Link>}>
         <p>{gate.reason}</p>
-        <p className="mt-1 text-xs">Rule pending Finance confirmation (UC-05 / DBL-CLT-005: Allow for Rescue requires a funded e-wallet).</p>
+        <p className="mt-1 text-sm">Rule pending Finance confirmation (UC-05 / DBL-CLT-005: Allow for Rescue requires a funded e-wallet).</p>
         <Contacts list={[aeContact(d)]} />
       </Banner>
     );
@@ -113,7 +113,7 @@ export function HoldNoticeAfterSignIn({ dash }: { dash?: Dash }) {
   if (!dash || !hold) return null;
   return (
     <Modal open={open} onClose={() => setOpen(false)} title={<span className="flex items-center gap-2 text-danger"><ShieldOff className="size-5" aria-hidden />{dash.client.clientName} is on hold</span>}
-      footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Continue to dashboard</Button><Link to="/client/invoices" onClick={() => setOpen(false)}><Button variant="danger">View balance</Button></Link></>}>
+      footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Continue to dashboard</Button><Link to="/client/invoices" onClick={() => setOpen(false)}><Button variant="danger" tabIndex={-1}>View balance</Button></Link></>}>
       <div className={cn('text-sm text-ink-2')}><HoldDetails d={dash} /></div>
     </Modal>
   );

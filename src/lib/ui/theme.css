@@ -1,5 +1,6 @@
 /* Delbros Leasing — LIGHT THEME ONLY (ADR-009, docs/03-design-system.md).
-   Tokens are Tailwind v4 @theme variables; there are intentionally no dark variants. */
+   Tokens are Tailwind v4 @theme variables; there are intentionally no dark variants.
+   Look: soft grey canvas, borderless white cards on layered shadows, pill controls (UI8 reference: LOGIX logistics dashboard kit). */
 @theme {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* IDs and codes ("font-mono") use Inter too — no Consolas / system monospace. Tabular digits keep ID columns aligned (see .font-mono below). */
@@ -17,15 +18,16 @@
   --color-brand-800: #1f3a68;
   --color-brand-900: #152a4d;
 
-  /* Surfaces & text */
-  --color-canvas: #f6f8fb;
+  /* Surfaces & text — cool neutrals that agree with the brand blue */
+  --color-canvas: #f1f3f6;
   --color-surface: #ffffff;
-  --color-surface-alt: #f1f4f8;
-  --color-line: #e3e8ef;
-  --color-line-strong: #cbd5e1;
+  --color-surface-alt: #f3f5f8;
+  /* Alpha lines recede on any surface (solid greys look pasted on). */
+  --color-line: rgb(15 23 42 / 0.08);
+  --color-line-strong: rgb(15 23 42 / 0.18);
   --color-ink: #0f172a;
   --color-ink-2: #334155;
-  --color-muted: #64748b;
+  --color-muted: #586273;
   --color-disabled: #94a3b8;
 
   /* Semantic */
@@ -48,8 +50,17 @@
   --color-purple-bg: #f4f3ff;
   --color-purple-line: #d9d6fe;
 
-  --radius-card: 0.75rem;
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.07);
+  /* Radii: cards 20px, dialogs 24px (rounded-3xl), fields 12px (rounded-xl), buttons and nav are pills. */
+  --radius-card: 1.25rem;
+  /* Elevation: a 1px ring standing in for the border, a crisp contact shadow and a soft ambient one. */
+  --shadow-card: 0 0 0 1px rgb(15 23 42 / 0.04), 0 1px 2px rgb(15 23 42 / 0.04), 0 6px 16px -6px rgb(15 23 42 / 0.08);
+  --shadow-pop: 0 0 0 1px rgb(15 23 42 / 0.06), 0 4px 10px -2px rgb(15 23 42 / 0.08), 0 20px 40px -12px rgb(15 23 42 / 0.22);
+
+  --animate-pop: pop-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(4px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
 }
 
 @layer base {
@@ -63,26 +74,31 @@
     line-height: 20px;
     -webkit-font-smoothing: antialiased;
   }
+  h1, h2, h3 { text-wrap: balance; }
+  p { text-wrap: pretty; }
   :focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 2px; }
   .tabular { font-variant-numeric: tabular-nums; }
   .font-mono, code, kbd, samp, pre { font-variant-numeric: tabular-nums; }
   /* Sideways scrollers never grow a vertical scrollbar from a 1px overhang (no stray ▲▼ arrows). */
   .overflow-x-auto { overflow-y: hidden; }
-  /* Thin, quiet scrollbars wherever real scrolling remains (tables, drawers, menus). */
-  * { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
+  /* Thin overlay-style scrollbars: transparent track, slim rounded thumb. */
+  html { scrollbar-width: thin; scrollbar-color: rgb(100 116 139 / 0.35) transparent; }
+  * { scrollbar-width: thin; scrollbar-color: rgb(100 116 139 / 0.35) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
   ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgb(100 116 139 / 0.35); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: rgb(100 116 139 / 0.55); }
+  ::-webkit-scrollbar-corner { background: transparent; }
   ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
   /* Dropdowns: replace the native arrow (flush to the edge) with an evenly inset chevron. */
   select:not([multiple]):not([size]) {
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23586273' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 0.625rem center;
+    background-position: right 0.75rem center;
     background-size: 1rem 1rem;
-    padding-right: 2.25rem !important;
+    padding-right: 2.5rem !important;
     text-overflow: ellipsis;
   }
   select:not([multiple]):not([size]):disabled { opacity: 1; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2394a3b8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E"); }

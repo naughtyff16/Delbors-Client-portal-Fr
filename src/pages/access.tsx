@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
 import { api, ApiError } from '../lib/api-client';
 import { REGISTRATION_FIELD_OWNERS, formatDateTime } from '../lib/shared';
 import { Badge, Banner, Button, Card, FormGrid, Input, Stack, Textarea } from '../lib/ui';
@@ -30,26 +30,26 @@ export function AccessStatusPage() {
   useEffect(() => { if (v.ref && v.email) void check(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const tone = res?.status === 'Approved' ? 'success' : res?.status === 'Rejected' ? 'danger' : 'warning';
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-5 py-10">
       <div className="w-full max-w-xl">
         <BrandBlock />
-        <Card>
-          <form onSubmit={(e) => { e.preventDefault(); void check(); }} noValidate className="space-y-4">
+        <Card className="p-7 sm:p-8">
+          <form onSubmit={(e) => { e.preventDefault(); void check(); }} noValidate className="flex flex-col gap-5">
             <div>
-              <h1 className="text-lg font-bold text-brand-800">Portal access request status</h1>
-              <p className="mt-1 text-sm text-ink-2">Enter the reference from your confirmation and the email you used. Both must match.</p>
+              <h1 className="text-2xl font-semibold tracking-tight text-ink">Portal access request status</h1>
+              <p className="mt-2 text-sm text-muted">Enter the reference from your confirmation and the email you used. Both must match.</p>
             </div>
             <FormGrid>
               <Input label="Reference" required value={v.ref} onChange={(e) => setV({ ...v, ref: e.target.value })} placeholder="PAR-000001" />
               <Input label="Email" type="email" required value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} placeholder="name@company.ph" />
             </FormGrid>
-            <Button type="submit" loading={busy}>Check status</Button>
+            <Button type="submit" loading={busy} className="self-start">Check status</Button>
             {err && <Banner tone="danger">{err}</Banner>}
           </form>
           {res && (
-            <div className="mt-5 space-y-4 border-t border-line pt-4 text-sm">
+            <div className="mt-6 flex flex-col gap-5 border-t border-line pt-5 text-sm">
               <p className="flex flex-wrap items-center gap-2"><span className="font-mono font-semibold">{res.reference}</span> · {res.companyName} <Badge tone={tone}>{res.statusLabel}</Badge></p>
-              <dl className="grid gap-x-4 gap-y-1.5 sm:grid-cols-[10rem_1fr]">
+              <dl className="grid gap-x-4 gap-y-2.5 rounded-2xl bg-surface-alt p-5 sm:grid-cols-[10rem_1fr]">
                 <dt className="text-muted">Submitted</dt><dd>{formatDateTime(res.submittedAt)}</dd>
                 <dt className="text-muted">Reviewer</dt><dd>{res.reviewer}{res.reviewerNotified ? ' · notified by email with an approval link' : ''}</dd>
                 {res.decidedAt && <><dt className="text-muted">Decided</dt><dd>{formatDateTime(res.decidedAt)}</dd></>}
@@ -59,20 +59,20 @@ export function AccessStatusPage() {
               </dl>
               <Banner tone={tone} title="Next step">{res.nextStep}</Banner>
               <div>
-                <p className="mb-1 text-xs font-medium text-muted">Emails sent to you</p>
-                <ul className="divide-y divide-line rounded-lg border border-line">
+                <p className="mb-2 text-sm font-medium text-muted">Emails sent to you</p>
+                <ul className="divide-y divide-line rounded-2xl bg-surface-alt">
                   {res.notices.map((n) => (
-                    <li key={n.subject} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                      <span>{n.subject}<span className="block text-xs text-muted">{formatDateTime(n.at)} · {n.to}</span></span>
+                    <li key={n.subject} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                      <span>{n.subject}<span className="block text-sm text-muted">{formatDateTime(n.at)} · {n.to}</span></span>
                       <Badge tone={deliveryTone(n.status)}>{deliveryLabel(n.status)}</Badge>
                     </li>
                   ))}
                 </ul>
               </div>
-              {res.status === 'Rejected' && <Link to="/register"><Button variant="secondary">Submit a new request</Button></Link>}
+              {res.status === 'Rejected' && <Link to="/register" className="self-start"><Button variant="secondary" tabIndex={-1}>Submit a new request</Button></Link>}
             </div>
           )}
-          <p className="mt-5 text-center text-sm"><Link to="/login" className="font-medium text-brand-600 hover:underline">← Back to sign in</Link></p>
+          <p className="mt-6 text-center text-sm"><Link to="/login" className="inline-flex items-center gap-1.5 font-medium text-brand-600 hover:underline"><ArrowLeft className="size-4" aria-hidden />Back to sign in</Link></p>
         </Card>
         <PublicFooter />
       </div>
@@ -102,19 +102,19 @@ export function AccessApprovalPage() {
     ? { status: r.status, statusLabel: r.statusLabel, decidedAt: r.decidedAt, decidedBy: r.decidedBy, billingName: r.billingName, companyCode: r.companyCode, reason: r.decisionReason, applicantNotice: undefined }
     : undefined);
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-5 py-10">
       <div className="w-full max-w-2xl">
         <BrandBlock />
-        <Card>
+        <Card className="p-7 sm:p-8">
           {info.error ? (
             <Banner tone="warning" title="Approval link not valid">{info.error instanceof ApiError ? info.error.message : 'This link could not be checked.'}</Banner>
           ) : !r ? <p className="text-sm text-muted">Checking the approval link…</p> : (
             <Stack>
               <div>
-                <h1 className="text-lg font-bold text-brand-800">{vendor ? 'Vendor' : 'Client'} portal access request — {r.reference}</h1>
-                <p className="mt-1 text-sm text-ink-2">Sent to {r.reviewer}. This link works once{r.expiresAt ? ` and expires ${formatDateTime(r.expiresAt)}` : ''}.</p>
+                <h1 className="text-2xl font-semibold tracking-tight text-ink">{vendor ? 'Vendor' : 'Client'} portal access request — {r.reference}</h1>
+                <p className="mt-2 text-sm text-muted">Sent to {r.reviewer}. This link works once{r.expiresAt ? ` and expires ${formatDateTime(r.expiresAt)}` : ''}.</p>
               </div>
-              <dl className="grid gap-x-4 gap-y-1.5 rounded-lg border border-line bg-surface-alt/50 p-4 text-sm sm:grid-cols-[10rem_1fr]">
+              <dl className="grid gap-x-4 gap-y-2.5 rounded-2xl bg-surface-alt p-5 text-sm sm:grid-cols-[10rem_1fr]">
                 {([['Company', r.companyName], ['TIN', r.tin || 'Not given'], ['Branch', r.branchCode], ['Address', r.address], ['Contact', `${r.contactName} · ${r.phone}`], ['Email (sign-in ID)', r.email], ['Submitted', formatDateTime(r.submittedAt)]] as const)
                   .map(([k, val]) => <div key={k} className="contents"><dt className="text-muted">{k}</dt><dd className="font-medium text-ink">{val}</dd></div>)}
                 <dt className="text-muted">Documents</dt><dd>{r.documents.length ? r.documents.join(', ') : <span className="text-muted">None attached</span>}</dd>
@@ -124,18 +124,18 @@ export function AccessApprovalPage() {
                   {decided.status === 'Approved'
                     ? <>The portal user is active. {decided.companyCode && <>Company code <span className="font-mono">{decided.companyCode}</span> · billing name “{decided.billingName}”. </>}Next: accreditation (Credit &amp; Collection → Finance → Vice President).</>
                     : <>Reason given to the applicant: {decided.reason}</>}
-                  {decided.applicantNotice && <span className="mt-1 block text-xs">Applicant emailed “{decided.applicantNotice.subject}” at {decided.applicantNotice.to} — {deliveryLabel(decided.applicantNotice.status).toLowerCase()}.</span>}
+                  {decided.applicantNotice && <span className="mt-1 block text-sm">Applicant emailed “{decided.applicantNotice.subject}” at {decided.applicantNotice.to} — {deliveryLabel(decided.applicantNotice.status).toLowerCase()}.</span>}
                 </Banner>
               ) : r.expired ? (
                 <Banner tone="warning" title="Link expired">Open the request from the staff app to approve or deny it.</Banner>
               ) : (
                 <>
                   {!vendor && (
-                    <div className="rounded-lg border border-line p-3 text-sm">
-                      <p className="mb-2 text-xs font-medium text-muted">Who fills which field (BRD UC-01 / Designer Brief)</p>
-                      <ul className="space-y-0.5 text-xs">{REGISTRATION_FIELD_OWNERS.map((o) => <li key={o.field}><span className="text-ink">{o.field}</span> — <strong>{o.owner}</strong> <span className="text-muted">· {o.when}</span></li>)}</ul>
-                      <p className="mt-3 text-sm">Company code <span className="font-mono font-semibold">{r.companyCode}</span> <span className="text-xs text-muted">(generated by the system)</span></p>
-                      <Input wrapperClassName="mt-2" label="Billing name" required value={billing ?? r.billingName} onChange={(e) => setBilling(e.target.value)} error={err?.fields?.billingName} hint="Printed on invoices and statements. Defaults to the company name." />
+                    <div className="rounded-2xl bg-surface-alt p-5 text-sm">
+                      <p className="mb-2 text-sm font-medium text-muted">Who fills which field (BRD UC-01 / Designer Brief)</p>
+                      <ul className="space-y-1 text-sm">{REGISTRATION_FIELD_OWNERS.map((o) => <li key={o.field}><span className="text-ink">{o.field}</span> — <strong>{o.owner}</strong> <span className="text-muted">· {o.when}</span></li>)}</ul>
+                      <p className="mt-4 text-sm">Company code <span className="font-mono font-semibold">{r.companyCode}</span> <span className="text-muted">(generated by the system)</span></p>
+                      <Input wrapperClassName="mt-3" label="Billing name" required value={billing ?? r.billingName} onChange={(e) => setBilling(e.target.value)} error={err?.fields?.billingName} hint="Printed on invoices and statements. Defaults to the company name." />
                     </div>
                   )}
                   {deny && <Textarea label="Reason for denial (sent to the applicant)" required value={reason} onChange={(e) => setReason(e.target.value)} error={err?.fields?.reason} placeholder="e.g. Business permit has expired — please attach the 2026 permit" />}
